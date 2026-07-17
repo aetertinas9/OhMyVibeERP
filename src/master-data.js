@@ -385,6 +385,22 @@ function validateEmployeeInput(input) {
   return employee;
 }
 
+function validatePayrollRunInput(input) {
+  const errors = {};
+  let payPeriod = "";
+  try {
+    payPeriod = monthBounds(input.payPeriod).month;
+  } catch {
+    errors.payPeriod = "급여 귀속월 형식이 올바르지 않습니다.";
+  }
+  const payDate = dateValue(input.payDate, "payDate", "급여일", errors, { required: true });
+  if (payPeriod && payDate && payDate.slice(0, 7) !== payPeriod) {
+    errors.payDate = "급여일은 급여 귀속월 안에서 선택해 주세요.";
+  }
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return { payPeriod, payDate, note: cleanText(input.note, 500) };
+}
+
 function validateStoredData(value) {
   if (
     !value
@@ -478,6 +494,18 @@ export class MasterDataRepository {
   async listEmployees() {
     const data = await this.data();
     return copy([...data.employees].sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber)));
+  }
+
+  async listPayrollRuns() {
+    const data = await this.data();
+    return copy([...data.payrollRuns].sort((left, right) => right.payDate.localeCompare(left.payDate)));
+  }
+
+  async getPayrollRun(runId) {
+    const data = await this.data();
+    const run = data.payrollRuns.find(({ id }) => id === runId);
+    if (!run) throw new RecordNotFoundError("급여대장을 찾을 수 없습니다.");
+    return copy(run);
   }
 
   async monthlyTradeSummary(monthInput) {
@@ -614,6 +642,71 @@ export class MasterDataRepository {
         createdBy: actorId,
       };
       data.employees.push(record);
+      return record;
+    });
+  }
+
+  async createPayrollRun(input, actorId) {
+    const validated = validatePayrollRunInput(input);
+    return this.mutate((data) => {
+      if (data.payrollRuns.some(({ payPeriod }) => payPeriod === validated.payPeriod)) {
+        throw new DuplicateRecordError("이미 확정된 급여 귀속월입니다.");
+      }
+      const employees = data.employees
+        .filter((employee) => employee.employmentStatus === "active" && employee.hireDate <= validated.payDate)
+        .sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber));
+      if (!employees.length) throw new BusinessRuleError("급여 대상 재직자가 없습니다.");
+
+      const lines = employees.map((employee) => {
+        const baseSalary = Number(employee.baseSalary);
+        const mealAllowance = Number(employee.mealAllowance || 0);
+        const otherAllowance = Number(employee.otherAllowance || 0);
+        const fixedDeduction = Number(employee.fixedDeduction || 0);
+        const grossPay = roundMoney(baseSalary + mealAllowance + otherAllowance);
+        if (![baseSalary, mealAllowance, otherAllowance, fixedDeduction, grossPay].every(Number.isFinite)) {
+          throw new BusinessRuleError(`${employee.employeeNumber} 직원의 급여 기준정보가 올바르지 않습니다.`);
+        }
+        if (fixedDeduction > grossPay) {
+          throw new BusinessRuleError(`${employee.employeeNumber} 직원의 등록 공제액이 지급 합계를 초과합니다.`);
+        }
+        return {
+          id: `payroll_line_${this.createId()}`,
+          employeeId: employee.id,
+          employeeNumber: employee.employeeNumber,
+          name: employee.name,
+          department: employee.department,
+          position: employee.position,
+          workLocation: employee.workLocation,
+          employmentType: employee.employmentType,
+          baseSalary,
+          mealAllowance,
+          otherAllowance,
+          grossPay,
+          fixedDeduction,
+          netPay: roundMoney(grossPay - fixedDeduction),
+        };
+      });
+
+      const dateKey = validated.payPeriod.replaceAll("-", "");
+      const prefix = `PAY-${dateKey}-`;
+      const sequence = data.payrollRuns.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const timestamp = this.now().toISOString();
+      const record = {
+        id: `payroll_run_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        payPeriod: validated.payPeriod,
+        payDate: validated.payDate,
+        status: "confirmed",
+        employeeCount: lines.length,
+        totalGrossPay: roundMoney(lines.reduce((total, line) => total + line.grossPay, 0)),
+        totalDeduction: roundMoney(lines.reduce((total, line) => total + line.fixedDeduction, 0)),
+        totalNetPay: roundMoney(lines.reduce((total, line) => total + line.netPay, 0)),
+        lines,
+        note: validated.note,
+        confirmedAt: timestamp,
+        confirmedBy: actorId,
+      };
+      data.payrollRuns.unshift(record);
       return record;
     });
   }
