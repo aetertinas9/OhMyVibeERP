@@ -1147,6 +1147,10 @@ export function monthlyTradeReportPage({
   partners,
   items,
   summary,
+  periodStatus = { closedThrough: "", closures: [] },
+  currentMonth = "",
+  error = "",
+  closed = false,
 }) {
   const partnerMap = new Map(partners.map((partner) => [partner.id, partner]));
   const itemMap = new Map(items.map((item) => [item.id, item]));
@@ -1157,6 +1161,18 @@ export function monthlyTradeReportPage({
   const differenceMessage = isPositive
     ? `판매액이 매입액보다 ${formatMoney(summary.differenceAmount)} 많습니다.`
     : `매입액이 판매액보다 ${formatMoney(Math.abs(summary.differenceAmount))} 많습니다.`;
+  const selectedIsClosed = Boolean(periodStatus.closedThrough && summary.month <= periodStatus.closedThrough);
+  const canCloseSelected = canAccess(user, PERMISSIONS.FINANCE_CLOSE)
+    && summary.month < currentMonth
+    && !selectedIsClosed;
+  const latestClosure = periodStatus.closures[0];
+  const [closedYear, closedMonth] = (periodStatus.closedThrough || "-").split("-").map(Number);
+  const closedThroughLabel = periodStatus.closedThrough ? `${closedYear}년 ${closedMonth}월` : "마감 이력 없음";
+  const periodNotice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : closed
+      ? `<div class="form-notice success" role="status">${escapeHtml(monthLabel)} 마감을 완료했습니다. 이 월과 이전 월 자료가 잠겼습니다.</div>`
+      : "";
 
   const transactionRows = summary.transactions.map((transaction) => {
     const isPurchase = transaction.type === "purchase";
@@ -1187,7 +1203,25 @@ export function monthlyTradeReportPage({
         <form action="/reports/monthly" method="get" class="month-filter"><label for="report-month">조회 월</label><input id="report-month" name="month" type="month" value="${escapeHtml(summary.month)}" required><button type="submit">조회</button></form>
       </header>
 
+      ${periodNotice}
+
       <aside class="report-basis"><span aria-hidden="true">i</span><p><strong>입고·출고 금액 기준입니다.</strong> 실제 지급·수금이나 부가세, 급여, 운임 등은 반영되지 않아 회계상 순이익과는 다릅니다.</p></aside>
+
+      <section class="period-close-card ${selectedIsClosed ? "closed" : canCloseSelected ? "closable" : "open"}" aria-labelledby="period-close-title" data-period-status="${selectedIsClosed ? "closed" : "open"}">
+        <div class="period-close-icon" aria-hidden="true">${selectedIsClosed ? "▣" : "□"}</div>
+        <div class="period-close-copy"><p>ACCOUNTING PERIOD</p><h2 id="period-close-title">${selectedIsClosed ? `${escapeHtml(monthLabel)}은 잠겼습니다.` : `${escapeHtml(monthLabel)} 마감 상태`}</h2>
+          <span>${selectedIsClosed
+            ? `${escapeHtml(closedThroughLabel)}까지 마감되어 발주·주문·생산·급여의 과거 자료를 새로 등록하거나 변경할 수 없습니다.${latestClosure ? ` 최종 마감 ${escapeHtml(formatKoreanDateTime(latestClosure.closedAt))}` : ""}`
+            : canCloseSelected
+              ? "금액과 거래 근거를 확인한 뒤 마감하세요. 선택 월과 그 이전 월이 함께 잠기며 이 화면에서는 되돌릴 수 없습니다."
+              : summary.month >= currentMonth
+                ? "현재 월과 미래 월은 마감할 수 없습니다. 월이 끝난 뒤 마감할 수 있습니다."
+                : "이 회계기간은 아직 열려 있습니다."}</span>
+        </div>
+        <div class="period-close-state"><small>마감 기준</small><strong>${escapeHtml(closedThroughLabel)}</strong>
+          ${canCloseSelected ? `<form action="/reports/monthly/close" method="post" data-period-close-form><input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}"><input type="hidden" name="month" value="${escapeHtml(summary.month)}"><button type="submit">${escapeHtml(monthLabel)} 마감</button></form>` : `<em>${selectedIsClosed ? "수정 잠금" : "기간 열림"}</em>`}
+        </div>
+      </section>
 
       <section class="trade-summary" aria-label="${escapeHtml(monthLabel)} 금액 요약">
         <article class="spent"><span>이번 달 쓴 금액</span><strong>${escapeHtml(formatMoney(summary.purchaseAmount))}</strong><p>구매 입고 ${summary.purchaseCount.toLocaleString("ko-KR")}건</p></article>

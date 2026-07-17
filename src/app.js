@@ -176,6 +176,21 @@ export async function createRequestHandler({
     ]);
     return { items, bills, productionOrders };
   };
+  const monthlyReportViewData = async (month) => {
+    const [summary, purchasePartners, salesPartners, items, periodStatus] = await Promise.all([
+      masterData.monthlyTradeSummary(month),
+      masterData.listPartners("purchases"),
+      masterData.listPartners("sales"),
+      masterData.listItems(),
+      masterData.accountingPeriodStatus(),
+    ]);
+    return {
+      summary,
+      partners: [...purchasePartners, ...salesPartners],
+      items,
+      periodStatus,
+    };
+  };
   const today = () => new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(now()));
@@ -633,7 +648,7 @@ export async function createRequestHandler({
         await masterData.createPurchaseOrder(values, session.user.id);
         redirect(response, "/purchase-orders?created=1", [], secure);
       } catch (error) {
-        if (!(error instanceof InputValidationError)) throw error;
+        if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
         const view = await purchaseOrderViewData();
         send(response, error.statusCode, purchaseOrdersPage({
           user: session.user,
@@ -641,7 +656,7 @@ export async function createRequestHandler({
           warehouses: WAREHOUSES,
           values,
           fieldErrors: error.fieldErrors,
-          error: "발주 필수 항목과 수량을 확인해 주세요.",
+          error: error instanceof BusinessRuleError ? error.message : "발주 필수 항목과 수량을 확인해 주세요.",
           ...view,
         }), {
           "Cache-Control": "no-store",
@@ -745,7 +760,7 @@ export async function createRequestHandler({
         await masterData.createSalesOrder(values, session.user.id);
         redirect(response, "/sales-orders?created=1", [], secure);
       } catch (error) {
-        if (!(error instanceof InputValidationError)) throw error;
+        if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
         const view = await salesOrderViewData();
         send(response, error.statusCode, salesOrdersPage({
           user: session.user,
@@ -753,7 +768,7 @@ export async function createRequestHandler({
           warehouses: WAREHOUSES,
           values,
           fieldErrors: error.fieldErrors,
-          error: "주문 필수 항목과 수량을 확인해 주세요.",
+          error: error instanceof BusinessRuleError ? error.message : "주문 필수 항목과 수량을 확인해 주세요.",
           ...view,
         }), {
           "Cache-Control": "no-store",
@@ -834,23 +849,57 @@ export async function createRequestHandler({
         return;
       }
       const month = url.searchParams.get("month") ?? today().slice(0, 7);
-      const [summary, purchasePartners, salesPartners, items] = await Promise.all([
-        masterData.monthlyTradeSummary(month),
-        masterData.listPartners("purchases"),
-        masterData.listPartners("sales"),
-        masterData.listItems(),
-      ]);
+      const view = await monthlyReportViewData(month);
       send(response, 200, monthlyTradeReportPage({
         user: session.user,
         csrfToken: session.csrfToken,
         warehouses: WAREHOUSES,
-        partners: [...purchasePartners, ...salesPartners],
-        items,
-        summary,
+        currentMonth: today().slice(0, 7),
+        closed: url.searchParams.get("closed") === "1",
+        ...view,
       }), {
         "Cache-Control": "no-store",
         "Content-Type": "text/html; charset=utf-8",
       }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/reports/monthly/close") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const requestedMonth = String(form.get("month") ?? "").slice(0, 20);
+      try {
+        await masterData.closeAccountingPeriod(requestedMonth, session.user.id);
+        redirect(response, `/reports/monthly?month=${encodeURIComponent(requestedMonth)}&closed=1`, [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof DuplicateRecordError)
+          && !(error instanceof BusinessRuleError)
+        ) throw error;
+        const displayMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)
+          ? requestedMonth
+          : today().slice(0, 7);
+        const view = await monthlyReportViewData(displayMonth);
+        send(response, error.statusCode, monthlyTradeReportPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          currentMonth: today().slice(0, 7),
+          error: error.message,
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
       return;
     }
 
@@ -959,7 +1008,7 @@ export async function createRequestHandler({
 
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
-      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/employees", "/payroll",
+      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/monthly/close", "/employees", "/payroll",
       "/payroll/runs",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
     send(
