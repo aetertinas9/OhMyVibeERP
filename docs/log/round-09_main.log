@@ -1,0 +1,18 @@
+# round-09 | branch: main | 2026-07-17
+# 이 회차 구현 중 발생한 버그 기록. 버그 하나당 한 블록. 버그가 없으면 "버그 없음"이라고 남긴다.
+
+[BUG-09-01] 대시보드 최근 매출 테스트의 생성 ID 기대값 오류
+  시각   : 2026-07-17 11:10
+  브랜치 : main
+  증상   : AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: actual id 'shipment_dashboard-11', expected id 'shipment_dashboard-18'
+  원인   : 테스트 픽스처의 ID 생성 순서를 잘못 계산한 값을 전체 객체 기대값에 하드코딩했다.
+  수정   : 생성 순서와 무관하게 출고 ID 접두사를 검증하고 실제 업무 필드만 구조 비교하도록 변경했다.
+  커밋   : 7c42e19
+
+[BUG-09-02] 기존 로그인 홈 테스트의 안내 문구 기대값 불일치
+  시각   : 2026-07-17 11:14
+  브랜치 : main
+  증상   : AssertionError [ERR_ASSERTION]: The input did not match the regular expression /이번 달 실제 출고액/.
+  원인   : 새 대시보드 안내문은 "이번 달의 실제 출고액"인데 기존 테스트 기대값에서 조사 "의"를 누락했다.
+  수정   : 실제 화면의 사용자 안내 문구와 동일한 정규식으로 기대값을 수정했다.
+  커밋   : 11a22fe
