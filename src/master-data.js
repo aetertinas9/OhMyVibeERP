@@ -28,6 +28,7 @@ const emptyData = () => ({
   billsOfMaterials: [],
   productionOrders: [],
   inventoryTransfers: [],
+  inventoryCounts: [],
   employees: createSyntheticEmployees(),
   payrollRuns: [],
   periodClosures: [],
@@ -123,6 +124,17 @@ function positiveQuantity(value, field, label, errors) {
   }, errors);
   if (!errors[field] && quantity <= 0) errors[field] = `${label}은(는) 0보다 커야 합니다.`;
   return quantity;
+}
+
+function requiredNonNegativeQuantity(value, field, label, errors) {
+  const source = String(value ?? "").replaceAll(",", "").trim();
+  if (!source) {
+    errors[field] = `${label}을(를) 입력해 주세요.`;
+    return 0;
+  }
+  return numericValue(source, {
+    field, label, maximum: MAX_QUANTITY, decimals: 2,
+  }, errors);
 }
 
 function positiveInteger(value, field, label, errors) {
@@ -500,6 +512,33 @@ function validateInventoryTransferInput(input) {
   };
 }
 
+function validateInventoryCountInput(input) {
+  const errors = {};
+  const warehouseId = requiredText(input.warehouseId, "warehouseId", "실사 창고", 30, errors);
+  if (warehouseId && !WAREHOUSES.some(({ id }) => id === warehouseId)) {
+    errors.warehouseId = "등록된 실사 창고를 선택해 주세요.";
+  }
+  const countDate = dateValue(input.countDate, "countDate", "실사일", errors, { required: true });
+  const submittedLines = (Array.isArray(input.lines) ? input.lines : []).filter((line) => (
+    cleanText(line?.itemId, 120) || String(line?.actualQuantity ?? "").trim()
+  ));
+  if (!submittedLines.length) errors.lines = "실사할 품목을 하나 이상 입력해 주세요.";
+  if (submittedLines.length > 20) errors.lines = "실사 품목은 최대 20개까지 입력할 수 있습니다.";
+  const lines = submittedLines.slice(0, 20).map((line, index) => ({
+    itemId: requiredText(line.itemId, `line${index}ItemId`, "품목", 120, errors),
+    actualQuantity: requiredNonNegativeQuantity(
+      line.actualQuantity, `line${index}ActualQuantity`, "실사 수량", errors,
+    ),
+  }));
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return {
+    warehouseId,
+    countDate,
+    note: cleanText(input.note, 300),
+    lines,
+  };
+}
+
 function validateBillOfMaterialsInput(input) {
   const errors = {};
   const productItemId = requiredText(input.productItemId, "productItemId", "완제품", 120, errors);
@@ -635,6 +674,7 @@ function validateStoredData(value) {
     || (value.billsOfMaterials !== undefined && !Array.isArray(value.billsOfMaterials))
     || (value.productionOrders !== undefined && !Array.isArray(value.productionOrders))
     || (value.inventoryTransfers !== undefined && !Array.isArray(value.inventoryTransfers))
+    || (value.inventoryCounts !== undefined && !Array.isArray(value.inventoryCounts))
     || (value.employees !== undefined && !Array.isArray(value.employees))
     || (value.payrollRuns !== undefined && !Array.isArray(value.payrollRuns))
     || (value.periodClosures !== undefined && !Array.isArray(value.periodClosures))
@@ -649,6 +689,7 @@ function validateStoredData(value) {
     billsOfMaterials: value.billsOfMaterials ?? [],
     productionOrders: value.productionOrders ?? [],
     inventoryTransfers: value.inventoryTransfers ?? [],
+    inventoryCounts: value.inventoryCounts ?? [],
     employees: value.employees ?? createSyntheticEmployees(),
     payrollRuns: value.payrollRuns ?? [],
     periodClosures: value.periodClosures ?? [],
@@ -725,6 +766,15 @@ export class MasterDataRepository {
     return copy([...data.inventoryTransfers].sort((left, right) => (
       right.transferDate.localeCompare(left.transferDate)
       || right.transferredAt.localeCompare(left.transferredAt)
+      || right.number.localeCompare(left.number)
+    )));
+  }
+
+  async listInventoryCounts() {
+    const data = await this.data();
+    return copy([...data.inventoryCounts].sort((left, right) => (
+      right.countDate.localeCompare(left.countDate)
+      || right.adjustedAt.localeCompare(left.adjustedAt)
       || right.number.localeCompare(left.number)
     )));
   }
@@ -1235,6 +1285,64 @@ export class MasterDataRepository {
         transferredBy: cleanText(actorId, 120),
       };
       data.inventoryTransfers.unshift(record);
+      return record;
+    });
+  }
+
+  async createInventoryCount(input, actorId) {
+    const validated = validateInventoryCountInput(input);
+    return this.mutate((data) => {
+      assertOpenPeriod(data, validated.countDate);
+      const errors = {};
+      const seenItemIds = new Set();
+      const adjustments = validated.lines.map((line, index) => {
+        const item = data.items.find(({ id }) => id === line.itemId);
+        if (!item) {
+          errors[`line${index}ItemId`] = "등록된 품목을 선택해 주세요.";
+          return null;
+        }
+        if (seenItemIds.has(item.id)) {
+          errors[`line${index}ItemId`] = "같은 품목은 한 실사 문서에 한 번만 추가할 수 있습니다.";
+          return null;
+        }
+        seenItemIds.add(item.id);
+        const normalized = itemWithWarehouseStock(item);
+        const bookQuantity = normalized.stockByWarehouse[validated.warehouseId];
+        return {
+          item,
+          normalized,
+          bookQuantity,
+          actualQuantity: line.actualQuantity,
+          differenceQuantity: roundMoney(line.actualQuantity - bookQuantity),
+        };
+      }).filter(Boolean);
+      if (Object.keys(errors).length) throw new InputValidationError(errors);
+
+      for (const adjustment of adjustments) {
+        adjustment.normalized.stockByWarehouse[validated.warehouseId] = adjustment.actualQuantity;
+        adjustment.item.stockByWarehouse = adjustment.normalized.stockByWarehouse;
+        adjustment.item.openingStock = totalWarehouseStock(adjustment.normalized.stockByWarehouse);
+      }
+
+      const dateKey = validated.countDate.replaceAll("-", "");
+      const prefix = `COUNT-${dateKey}-`;
+      const sequence = data.inventoryCounts.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const record = {
+        id: `inventory_count_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        warehouseId: validated.warehouseId,
+        countDate: validated.countDate,
+        lines: adjustments.map(({ item, bookQuantity, actualQuantity, differenceQuantity }) => ({
+          itemId: item.id,
+          bookQuantity,
+          actualQuantity,
+          differenceQuantity,
+        })),
+        note: validated.note,
+        adjustedAt: this.now().toISOString(),
+        adjustedBy: cleanText(actorId, 120),
+      };
+      data.inventoryCounts.unshift(record);
       return record;
     });
   }
