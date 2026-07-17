@@ -29,6 +29,7 @@ import {
   productionPage,
   purchaseOrdersPage,
   salesOrdersPage,
+  settlementsPage,
 } from "./html.js";
 import {
   BusinessRuleError,
@@ -191,6 +192,7 @@ export async function createRequestHandler({
       periodStatus,
     };
   };
+  const settlementViewData = async () => ({ overview: await masterData.settlementOverview() });
   const today = () => new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(now()));
@@ -864,6 +866,71 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/settlements") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      send(response, 200, settlementsPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        today: today(),
+        recorded: url.searchParams.get("recorded") ?? "",
+        ...await settlementViewData(),
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (
+      request.method === "POST"
+      && (url.pathname === "/settlements/collections" || url.pathname === "/settlements/payments")
+    ) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const type = url.pathname.endsWith("/collections") ? "collection" : "payment";
+      const values = Object.fromEntries(["orderId", "transactionDate", "amount", "note"].map((field) => (
+        [field, form.get(field) ?? ""]
+      )));
+      try {
+        if (type === "collection") {
+          await masterData.recordCustomerCollection(values, session.user.id);
+        } else {
+          await masterData.recordSupplierPayment(values, session.user.id);
+        }
+        redirect(response, `/settlements?recorded=${type}`, [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof BusinessRuleError)
+          && !(error instanceof RecordNotFoundError)
+        ) throw error;
+        send(response, error.statusCode, settlementsPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          today: today(),
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          errorType: type,
+          ...await settlementViewData(),
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/reports/monthly/close") {
       if (!session) {
         redirect(response, "/login", [], secure);
@@ -1009,7 +1076,7 @@ export async function createRequestHandler({
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
       "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/monthly/close", "/employees", "/payroll",
-      "/payroll/runs",
+      "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
     send(
       response,

@@ -23,6 +23,7 @@ export const PERMISSIONS = Object.freeze({
   PRODUCTION_MANAGE: "production.manage",
   FINANCE_REPORT: "finance.report",
   FINANCE_CLOSE: "finance.close",
+  FINANCE_SETTLEMENTS: "finance.settlements",
   EMPLOYEES_MANAGE: "employees.manage",
   PAYROLL_MANAGE: "payroll.manage",
 });
@@ -61,6 +62,7 @@ const departmentPermissions = Object.freeze({
     PERMISSIONS.HOME,
     PERMISSIONS.FINANCE_REPORT,
     PERMISSIONS.FINANCE_CLOSE,
+    PERMISSIONS.FINANCE_SETTLEMENTS,
   ]),
   hr: new Set([
     PERMISSIONS.HOME,
@@ -103,6 +105,9 @@ export function permissionForRequest(method, pathname) {
   }
   if (pathname === "/reports/monthly") return PERMISSIONS.FINANCE_REPORT;
   if (pathname === "/reports/monthly/close") return PERMISSIONS.FINANCE_CLOSE;
+  if (pathname === "/settlements" || pathname === "/settlements/collections" || pathname === "/settlements/payments") {
+    return PERMISSIONS.FINANCE_SETTLEMENTS;
+  }
   if (pathname === "/employees") return PERMISSIONS.EMPLOYEES_MANAGE;
   if (pathname === "/payroll" || pathname === "/payroll/runs" || /^\/payroll\/[^/]+\/statements$/.test(pathname)) {
     return PERMISSIONS.PAYROLL_MANAGE;

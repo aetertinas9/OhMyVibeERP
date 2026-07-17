@@ -124,6 +124,7 @@ const navigationGroups = Object.freeze([
   ]) }),
   Object.freeze({ label: "보고서", links: Object.freeze([
     Object.freeze({ active: "monthly-report", href: "/reports/monthly", icon: "₩", label: "월간 매입·판매", description: "월간 금액과 회계월 마감", permission: PERMISSIONS.FINANCE_REPORT }),
+    Object.freeze({ active: "settlements", href: "/settlements", icon: "◎", label: "받을 돈 · 줄 돈", description: "거래처별 입금·지급과 잔액", permission: PERMISSIONS.FINANCE_SETTLEMENTS }),
   ]) }),
   Object.freeze({ label: "인사 · 급여", links: Object.freeze([
     Object.freeze({ active: "employees", href: "/employees", icon: "♙", label: "직원 명부", description: "직원·급여 기준정보", permission: PERMISSIONS.EMPLOYEES_MANAGE }),
@@ -218,10 +219,10 @@ export function appPage({ user, csrfToken, dashboard, asOfDate }) {
       <section class="dashboard-kpis" aria-label="대표 핵심 지표">
         <a class="dashboard-kpi low-stock" href="/inventory" data-dashboard-kpi="low-stock"><span><i aria-hidden="true">!</i> 재고 부족</span><strong>${dashboard.lowStockCount.toLocaleString("ko-KR")}<small>개 품목</small></strong><p>전체 ${dashboard.totalItemCount.toLocaleString("ko-KR")}개 중 안전재고 이하 <b>재고 보기 →</b></p></a>
         <a class="dashboard-kpi monthly-sales" href="/reports/monthly?month=${escapeHtml(dashboard.month)}" data-dashboard-kpi="monthly-sales"><span><i aria-hidden="true">↗</i> ${month}월 매출</span><strong>${escapeHtml(formatMoney(dashboard.monthlySalesAmount))}</strong><p>이번 달 실제 출고 ${dashboard.monthlyShipmentCount.toLocaleString("ko-KR")}건 <b>매출 근거 →</b></p></a>
-        <a class="dashboard-kpi outstanding" href="/sales-orders" data-dashboard-kpi="receivable"><span><i aria-hidden="true">₩</i> 받을 돈</span><strong>${escapeHtml(formatMoney(dashboard.outstandingReceivableAmount))}</strong><p>출고 후 받을 금액 ${dashboard.receivableOrderCount.toLocaleString("ko-KR")}건 <b>주문 보기 →</b></p></a>
+        <a class="dashboard-kpi outstanding" href="/settlements" data-dashboard-kpi="receivable"><span><i aria-hidden="true">₩</i> 받을 돈</span><strong>${escapeHtml(formatMoney(dashboard.outstandingReceivableAmount))}</strong><p>출고액에서 입금액을 뺀 잔액 ${dashboard.receivableOrderCount.toLocaleString("ko-KR")}건 <b>정산 보기 →</b></p></a>
       </section>
 
-      <aside class="dashboard-basis"><span aria-hidden="true">i</span><p><strong>숫자 기준</strong> 매출은 한국 시간 이번 달의 실제 출고액입니다. 받을 돈은 출고로 누적된 금액이며 현재 수금 차감 기능은 포함하지 않습니다.</p></aside>
+      <aside class="dashboard-basis"><span aria-hidden="true">i</span><p><strong>숫자 기준</strong> 매출은 한국 시간 이번 달의 실제 출고액입니다. 받을 돈은 실제 출고액에서 재무가 기록한 입금액을 뺀 현재 잔액입니다.</p></aside>
 
       <div class="dashboard-detail-grid">
         <section class="dashboard-panel stock-panel" aria-labelledby="dashboard-stock-title">
@@ -236,7 +237,7 @@ export function appPage({ user, csrfToken, dashboard, asOfDate }) {
           </section>
 
           <section class="dashboard-panel" aria-labelledby="dashboard-receivable-title">
-            <header><div><p>RECEIVABLES</p><h2 id="dashboard-receivable-title">받을 돈이 남은 주문</h2></div><a href="/sales-orders">주문·출고</a></header>
+            <header><div><p>RECEIVABLES</p><h2 id="dashboard-receivable-title">받을 돈이 남은 주문</h2></div><a href="/settlements">입금 처리</a></header>
             <div class="dashboard-panel-list compact">${receivableOrders || `<div class="dashboard-empty compact"><strong>받을 금액이 없습니다.</strong><p>출고된 판매 주문이 아직 없습니다.</p></div>`}</div>
           </section>
         </div>
@@ -675,7 +676,7 @@ export function purchaseOrdersPage({
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>발주일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>입고 예정</dt><dd>${escapeHtml(order.expectedDate ? formatDate(order.expectedDate) : "미정")}</dd></div></dl></div>
         </header>
         <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>발주</th><th>입고</th><th>미입고</th><th>단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><p>${canViewPurchaseAmounts ? `발주 합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong>` : "발주 금액은 구매 부서 전용"}</p></div>
+        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewPurchaseAmounts ? `<div><p>발주합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>입고금액 <strong>${escapeHtml(formatMoney(order.receivedAmount))}</strong></p><p>지급금액 <strong>${escapeHtml(formatMoney(order.paidAmount))}</strong></p><p class="payable-amount">줄 금액 <strong>${escapeHtml(formatMoney(order.payableAmount))}</strong></p></div>` : "발주 금액은 구매 부서 전용"}</div>
         ${receiptFields}
       </article>`;
     }).join("")
@@ -973,7 +974,7 @@ export function salesOrdersPage({
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>주문일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>출고 요청</dt><dd>${escapeHtml(order.requestedShipDate ? formatDate(order.requestedShipDate) : "미정")}</dd></div></dl></div>
         </header>
         <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>주문</th><th>출고</th><th>미출고</th><th>판매 단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewSalesAmounts ? `<div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div>` : `<p>주문·채권 금액은 영업 부서 전용</p>`}</div>
+        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewSalesAmounts ? `<div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>출고금액 <strong>${escapeHtml(formatMoney(order.shippedAmount))}</strong></p><p>받은 금액 <strong>${escapeHtml(formatMoney(order.collectedAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div>` : `<p>주문·채권 금액은 영업 부서 전용</p>`}</div>
         ${shipmentFields}
       </article>`;
     }).join("")
@@ -1136,6 +1137,79 @@ export function productionPage({
 
       <section class="orders-section production-section"><div class="orders-title"><p>PRODUCT STRUCTURE</p><h2>완제품별 부품 구성</h2></div>${billCards}</section>
       <section class="orders-section production-section"><div class="orders-title"><p>PRODUCTION HISTORY</p><h2>생산·재고 반영 이력</h2></div>${productionCards}</section>
+    </section>`,
+  });
+}
+
+export function settlementsPage({
+  user,
+  csrfToken,
+  overview,
+  today,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  errorType = "",
+  recorded = "",
+}) {
+  const partnerTable = (type, balances) => {
+    const isCollection = type === "collection";
+    const rows = balances.map((partner) => `<tr data-partner-balance="${escapeHtml(partner.partnerId)}">
+      <td><strong>${escapeHtml(partner.name)}</strong><small>${escapeHtml(partner.code)}</small></td>
+      <td class="number-cell">${escapeHtml(formatMoney(partner.transactionAmount))}</td>
+      <td class="number-cell settled">${escapeHtml(formatMoney(partner.settledAmount))}</td>
+      <td class="number-cell balance ${partner.balance > 0 ? "open" : "clear"}"><strong>${escapeHtml(formatMoney(partner.balance))}</strong></td>
+      <td>${partner.documentCount ? `<span class="open-document-count">${partner.documentCount.toLocaleString("ko-KR")}건</span>` : `<span class="cleared-label">정산 완료</span>`}</td>
+    </tr>`).join("");
+    return `<section class="partner-balance-card ${isCollection ? "receivable" : "payable"}" aria-labelledby="${type}-partner-title">
+      <header><div><p>${isCollection ? "ACCOUNTS RECEIVABLE" : "ACCOUNTS PAYABLE"}</p><h2 id="${type}-partner-title">${isCollection ? "판매처별 받을 돈" : "구매처별 줄 돈"}</h2></div><strong>${balances.length.toLocaleString("ko-KR")}<small>개 거래처</small></strong></header>
+      ${balances.length ? `<div class="table-scroll"><table><thead><tr><th>거래처</th><th>${isCollection ? "출고금액" : "입고금액"}</th><th>${isCollection ? "받은 금액" : "지급금액"}</th><th>${isCollection ? "받을 돈" : "줄 돈"}</th><th>미결 문서</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="settlement-empty compact"><strong>${isCollection ? "등록된 판매처" : "등록된 구매처"}가 없습니다.</strong></div>`}
+    </section>`;
+  };
+
+  const documentCards = (type, documents) => {
+    const isCollection = type === "collection";
+    return documents.map((document) => {
+      const hasError = errorType === type && values.orderId === document.id;
+      return `<article class="settlement-document ${isCollection ? "receivable" : "payable"}" data-settlement-document="${escapeHtml(document.id)}">
+        <header><div><span>${isCollection ? "받을 돈" : "줄 돈"}</span><strong>${escapeHtml(document.partnerName)}</strong><small>${escapeHtml(document.partnerCode)} · ${escapeHtml(document.number)} · ${escapeHtml(formatDate(document.documentDate))}</small></div><b>${escapeHtml(formatMoney(document.balance))}</b></header>
+        <dl><div><dt>${isCollection ? "출고금액" : "입고금액"}</dt><dd>${escapeHtml(formatMoney(document.transactionAmount))}</dd></div><div><dt>${isCollection ? "받은 금액" : "지급금액"}</dt><dd>${escapeHtml(formatMoney(document.settledAmount))}</dd></div><div><dt>현재 잔액</dt><dd>${escapeHtml(formatMoney(document.balance))}</dd></div></dl>
+        <form action="/settlements/${isCollection ? "collections" : "payments"}" method="post" class="settlement-entry-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}"><input type="hidden" name="orderId" value="${escapeHtml(document.id)}">
+          <label>${isCollection ? "입금일" : "지급일"}<input name="transactionDate" type="date" value="${escapeHtml(hasError ? values.transactionDate : today)}" required${hasError ? inputState("transactionDate", fieldErrors) : ""}>${hasError ? fieldError("transactionDate", fieldErrors) : ""}</label>
+          <label>${isCollection ? "받은 금액" : "지급한 금액"}<span class="money-input"><input name="amount" type="number" value="${escapeHtml(hasError ? values.amount : "")}" placeholder="최대 ${escapeHtml(document.balance)}" min="0.01" max="${escapeHtml(document.balance)}" step="0.01" inputmode="decimal" required${hasError ? inputState("amount", fieldErrors) : ""}><i>원</i></span>${hasError ? fieldError("amount", fieldErrors) : ""}</label>
+          <label>메모<input name="note" value="${escapeHtml(hasError ? values.note : "")}" placeholder="계좌·지급 메모 (선택)" maxlength="300"></label>
+          <button type="submit">${isCollection ? "입금 반영" : "지급 반영"} <span aria-hidden="true">→</span></button>
+        </form>
+      </article>`;
+    }).join("");
+  };
+
+  const transactionRows = overview.transactions.map((transaction) => {
+    const isCollection = transaction.type === "collection";
+    return `<tr data-settlement-transaction="${escapeHtml(transaction.number)}"><td><span class="settlement-type ${isCollection ? "collection" : "payment"}">${isCollection ? "입금" : "지급"}</span></td><td><strong>${escapeHtml(formatDate(transaction.transactionDate))}</strong><small>${escapeHtml(transaction.number)}</small></td><td><strong>${escapeHtml(transaction.partnerName)}</strong><small>${escapeHtml(transaction.partnerCode)}</small></td><td><strong>${escapeHtml(transaction.documentNumber)}</strong></td><td class="number-cell settlement-transaction-amount ${isCollection ? "collection" : "payment"}">${isCollection ? "+" : "-"}${escapeHtml(formatMoney(transaction.amount))}</td><td>${escapeHtml(transaction.note || "메모 없음")}</td></tr>`;
+  }).join("");
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : recorded === "collection"
+      ? `<div class="form-notice success" role="status">입금을 반영해 받을 돈을 차감했습니다.</div>`
+      : recorded === "payment"
+        ? `<div class="form-notice success" role="status">지급을 반영해 줄 돈을 차감했습니다.</div>`
+        : "";
+
+  return workspacePage({
+    title: "받을 돈 · 줄 돈",
+    active: "settlements",
+    user,
+    csrfToken,
+    content: `<section class="settlements-content">
+      <header class="settlements-heading"><div><p class="form-kicker">RECEIVABLES & PAYABLES</p><h1>받을 돈 · 줄 돈</h1><p>실제 입금과 지급을 기록하고 거래처별 남은 금액을 확인합니다.</p></div><div class="settlement-asof"><span>기준일</span><strong>${escapeHtml(formatDate(today))}</strong></div></header>
+      ${notice}
+      <section class="settlement-kpis" aria-label="채권 채무 합계"><article class="receivable"><span>전체 받을 돈</span><strong>${escapeHtml(formatMoney(overview.receivableTotal))}</strong><p>미수 판매 주문 ${overview.receivableDocuments.length.toLocaleString("ko-KR")}건</p></article><article class="payable"><span>전체 줄 돈</span><strong>${escapeHtml(formatMoney(overview.payableTotal))}</strong><p>미지급 구매 발주 ${overview.payableDocuments.length.toLocaleString("ko-KR")}건</p></article><article class="net"><span>받을 돈 - 줄 돈</span><strong>${overview.receivableTotal - overview.payableTotal >= 0 ? "+" : "-"}${escapeHtml(formatMoney(Math.abs(overview.receivableTotal - overview.payableTotal)))}</strong><p>현금잔액이나 회계상 순자산이 아닌 단순 잔액 차이</p></article></section>
+      <aside class="settlement-basis"><span aria-hidden="true">i</span><p><strong>실제 입출고 기준입니다.</strong> 판매 출고 시 받을 돈, 구매 입고 시 줄 돈이 생깁니다. 재무가 입금·지급을 기록하면 해당 문서와 거래처 잔액이 함께 줄어듭니다.</p></aside>
+      <div class="partner-balance-grid">${partnerTable("collection", overview.customerBalances)}${partnerTable("payment", overview.supplierBalances)}</div>
+      <section class="open-settlements" aria-labelledby="open-settlements-title"><header><div><p>OPEN DOCUMENTS</p><h2 id="open-settlements-title">입금 · 지급 처리</h2></div><span>잔액이 있는 문서만 표시</span></header><div class="open-settlement-columns"><section><h3>받을 돈 <small>${overview.receivableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("collection", overview.receivableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>받을 돈이 없습니다.</strong><p>출고 후 아직 입금되지 않은 문서가 없습니다.</p></div>`}</section><section><h3>줄 돈 <small>${overview.payableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("payment", overview.payableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>줄 돈이 없습니다.</strong><p>입고 후 아직 지급하지 않은 문서가 없습니다.</p></div>`}</section></div></section>
+      <section class="settlement-history" aria-labelledby="settlement-history-title"><header><div><p>CASH SETTLEMENT HISTORY</p><h2 id="settlement-history-title">최근 입금 · 지급 근거</h2></div><span>총 <strong>${overview.transactions.length.toLocaleString("ko-KR")}</strong>건</span></header>${transactionRows ? `<div class="table-scroll"><table><thead><tr><th>구분</th><th>처리일·번호</th><th>거래처</th><th>대상 문서</th><th>금액</th><th>메모</th></tr></thead><tbody>${transactionRows}</tbody></table></div>` : `<div class="settlement-empty"><span aria-hidden="true">◎</span><strong>입금·지급 이력이 없습니다.</strong><p>위 미결 문서에서 처리하면 근거가 여기에 남습니다.</p></div>`}</section>
     </section>`,
   });
 }
