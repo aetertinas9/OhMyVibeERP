@@ -13,11 +13,13 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
-import { appPage, inventoryPage, itemPage, loginPage, partnerPage } from "./html.js";
+import { appPage, inventoryPage, itemPage, loginPage, partnerPage, purchaseOrdersPage } from "./html.js";
 import {
+  BusinessRuleError,
   createFileMasterDataRepository,
   DuplicateRecordError,
   InputValidationError,
+  RecordNotFoundError,
   WAREHOUSES,
 } from "./master-data.js";
 
@@ -127,6 +129,17 @@ export async function createRequestHandler({
     filePath: env.ERP_DATA_FILE,
     now: () => new Date(now()),
   });
+  const purchaseOrderViewData = async () => {
+    const [suppliers, items, orders] = await Promise.all([
+      masterData.listPartners("purchases"),
+      masterData.listItems(),
+      masterData.listPurchaseOrders(),
+    ]);
+    return { suppliers, items, orders };
+  };
+  const today = () => new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(now()));
 
   const route = async (request, response) => {
     const url = new URL(request.url, "http://localhost");
@@ -367,6 +380,118 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/purchase-orders") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const view = await purchaseOrderViewData();
+      send(response, 200, purchaseOrdersPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        warehouses: WAREHOUSES,
+        values: { orderDate: today() },
+        created: url.searchParams.get("created") === "1",
+        received: url.searchParams.get("received") === "1",
+        ...view,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/purchase-orders") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const itemIds = form.getAll("lineItemId");
+      const quantities = form.getAll("lineQuantity");
+      const unitPrices = form.getAll("lineUnitPrice");
+      const values = {
+        supplierId: form.get("supplierId") ?? "",
+        warehouseId: form.get("warehouseId") ?? "",
+        orderDate: form.get("orderDate") ?? "",
+        expectedDate: form.get("expectedDate") ?? "",
+        note: form.get("note") ?? "",
+        lines: Array.from({ length: Math.max(itemIds.length, quantities.length, unitPrices.length) }, (_, index) => ({
+          itemId: itemIds[index] ?? "",
+          quantity: quantities[index] ?? "",
+          unitPrice: unitPrices[index] ?? "",
+        })),
+      };
+      try {
+        await masterData.createPurchaseOrder(values, session.user.id);
+        redirect(response, "/purchase-orders?created=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError)) throw error;
+        const view = await purchaseOrderViewData();
+        send(response, error.statusCode, purchaseOrdersPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          values,
+          fieldErrors: error.fieldErrors,
+          error: "발주 필수 항목과 수량을 확인해 주세요.",
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    const receiptMatch = url.pathname.match(/^\/purchase-orders\/([^/]+)\/receive$/);
+    if (request.method === "POST" && receiptMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const input = {
+        note: form.get("receiptNote") ?? "",
+        lines: [...form.entries()]
+          .filter(([name]) => name.startsWith("receipt_") && name !== "receiptNote")
+          .map(([name, quantity]) => ({ lineId: name.slice("receipt_".length), quantity })),
+      };
+      try {
+        await masterData.receivePurchaseOrder(receiptMatch[1], input, session.user.id);
+        redirect(response, "/purchase-orders?received=1", [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof BusinessRuleError)
+          && !(error instanceof RecordNotFoundError)
+        ) throw error;
+        const view = await purchaseOrderViewData();
+        send(response, error.statusCode, purchaseOrdersPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          values: { orderDate: today() },
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          receiptOrderId: receiptMatch[1],
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/logout") {
       if (!session) {
         redirect(response, "/login", [serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })], secure);
@@ -390,7 +515,7 @@ export async function createRequestHandler({
       return;
     }
 
-    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items", "/inventory"].includes(url.pathname) || Boolean(partnerMatch);
+    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders"].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch);
     send(
       response,
       knownPath ? 405 : 404,

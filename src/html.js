@@ -108,8 +108,8 @@ const navigation = ({ active }) => `
     <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
     <a class="${active === "items" ? "active" : ""}" href="/items"><span aria-hidden="true">◇</span> 품목</a>
     <p class="nav-section">업무 관리</p>
+    <a class="${active === "purchase-orders" ? "active" : ""}" href="/purchase-orders"><span aria-hidden="true">▦</span> 발주 관리</a>
     <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
-    <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
   </nav>`;
 
@@ -167,7 +167,7 @@ export function appPage({ user, csrfToken }) {
 
             <div class="summary-grid" aria-label="업무 요약">
               <article><span>오늘 매출</span><strong>—</strong><small>데이터 연결 전</small></article>
-              <article><span>처리할 주문</span><strong>—</strong><small>데이터 연결 전</small></article>
+              <article><span>처리할 발주</span><strong>—</strong><small>발주 관리에서 확인</small></article>
               <article><span>재고 알림</span><strong>—</strong><small>데이터 연결 전</small></article>
             </div>
           </section>`,
@@ -501,6 +501,135 @@ export function inventoryPage({ user, csrfToken, items, warehouses }) {
           </table>
         </div>
       </section>
+    </section>`,
+  });
+}
+
+const orderStatus = {
+  ordered: { label: "발주 완료", className: "ordered" },
+  partially_received: { label: "일부 입고", className: "partial" },
+  received: { label: "입고 완료", className: "received" },
+};
+
+export function purchaseOrdersPage({
+  user,
+  csrfToken,
+  suppliers,
+  items,
+  warehouses,
+  orders,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+  received = false,
+  receiptOrderId = "",
+}) {
+  const supplierMap = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const lines = Array.from({ length: 5 }, (_, index) => values.lines?.[index] ?? {});
+  const prerequisitesReady = suppliers.length > 0 && items.length > 0;
+
+  const supplierOptions = suppliers.map((supplier) => (
+    `<option value="${escapeHtml(supplier.id)}"${values.supplierId === supplier.id ? " selected" : ""}>${escapeHtml(supplier.code)} · ${escapeHtml(supplier.name)}</option>`
+  )).join("");
+  const itemOptions = (selectedId) => items.map((item) => (
+    `<option value="${escapeHtml(item.id)}"${selectedId === item.id ? " selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)} (${escapeHtml(item.unit)}, 매입 ${escapeHtml(formatMoney(item.purchasePrice))})</option>`
+  )).join("");
+
+  const orderCards = orders.length
+    ? orders.map((order) => {
+      const supplier = supplierMap.get(order.supplierId);
+      const warehouse = warehouseMap.get(order.warehouseId);
+      const status = orderStatus[order.status] ?? orderStatus.ordered;
+      const receiptErrors = receiptOrderId === order.id ? fieldErrors : {};
+      const orderLines = order.lines.map((line) => {
+        const item = itemMap.get(line.itemId);
+        const remaining = Math.round((line.quantity - line.receivedQuantity) * 100) / 100;
+        return `<tr>
+          <td><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><small>${escapeHtml(item?.code ?? line.itemId)} · ${escapeHtml(item?.unit ?? "")}</small></td>
+          <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
+          <td><strong class="received-quantity">${escapeHtml(formatQuantity(line.receivedQuantity, item?.unit ?? ""))}</strong></td>
+          <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
+          <td class="number-cell">${escapeHtml(formatMoney(line.unitPrice))}</td>
+          <td class="number-cell">${escapeHtml(formatMoney(line.quantity * line.unitPrice))}</td>
+        </tr>`;
+      }).join("");
+      const receiptFields = order.status !== "received"
+        ? `<form action="/purchase-orders/${escapeHtml(order.id)}/receive" method="post" class="receipt-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="receipt-heading"><div><span>GOODS RECEIPT</span><h3>입고 처리</h3></div><p>실제로 도착한 수량만 입력하세요. 저장 즉시 ${escapeHtml(warehouse?.name ?? "입고 창고")} 재고가 늘어납니다.</p></div>
+            ${receiptErrors.receipt ? `<div class="inline-error">${escapeHtml(receiptErrors.receipt)}</div>` : ""}
+            <div class="receipt-inputs">
+              ${order.lines.map((line) => {
+                const item = itemMap.get(line.itemId);
+                const remaining = Math.round((line.quantity - line.receivedQuantity) * 100) / 100;
+                const field = `receipt_${line.id}`;
+                if (remaining <= 0) return "";
+                return `<label><span>${escapeHtml(item?.name ?? "품목")} <small>미입고 ${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</small></span>
+                  <input name="${escapeHtml(field)}" type="number" placeholder="0" min="0" max="${escapeHtml(remaining)}" step="0.01" inputmode="decimal"${inputState(field, receiptErrors)}>
+                  ${fieldError(field, receiptErrors)}
+                </label>`;
+              }).join("")}
+            </div>
+            <div class="receipt-actions"><input name="receiptNote" placeholder="입고 메모 (선택)" maxlength="300"><button type="submit">입고 반영 <span aria-hidden="true">→</span></button></div>
+          </form>`
+        : `<div class="receipt-complete"><span aria-hidden="true">✓</span><div><strong>모든 품목의 입고가 완료됐습니다.</strong><p>${escapeHtml(formatDate(order.receivedAt))} · ${escapeHtml(warehouse?.name ?? "")}</p></div></div>`;
+
+      return `<article class="purchase-order-card">
+        <header>
+          <div><span class="order-number">${escapeHtml(order.number)}</span><h2>${escapeHtml(supplier?.name ?? "알 수 없는 구매처")}</h2><p>${escapeHtml(supplier?.code ?? "")} · ${escapeHtml(warehouse?.name ?? order.warehouseId)} 입고</p></div>
+          <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>발주일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>입고 예정</dt><dd>${escapeHtml(order.expectedDate ? formatDate(order.expectedDate) : "미정")}</dd></div></dl></div>
+        </header>
+        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>발주</th><th>입고</th><th>미입고</th><th>단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
+        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><p>발주 합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p></div>
+        ${receiptFields}
+      </article>`;
+    }).join("")
+    : `<div class="order-empty"><span aria-hidden="true">▦</span><h2>등록된 발주가 없습니다.</h2><p>구매처와 입고 창고를 선택해 첫 발주를 등록해 보세요.</p></div>`;
+
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">발주 등록을 완료했습니다.</div>`
+      : received
+        ? `<div class="form-notice success" role="status">입고 수량을 재고에 반영했습니다.</div>`
+        : "";
+
+  return workspacePage({
+    title: "발주 관리",
+    active: "purchase-orders",
+    user,
+    csrfToken,
+    content: `<section class="purchase-content">
+      <header class="purchase-heading"><div><p class="form-kicker">PURCHASE ORDER</p><h1>발주 관리</h1><p>구매처에 발주하고 입고된 수량을 창고 재고에 바로 반영합니다.</p></div><span><b>${orders.length}</b>건 발주</span></header>
+      ${notice}
+      ${!prerequisitesReady ? `<div class="prerequisite-notice"><strong>발주 전에 기준정보가 필요합니다.</strong><p>${!suppliers.length ? "구매처" : ""}${!suppliers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
+
+      <details class="purchase-create"${!orders.length || error && !receiptOrderId ? " open" : ""}>
+        <summary><span><i>NEW</i><strong>새 발주 등록</strong></span><em>구매처·입고 창고·품목 선택</em></summary>
+        <form action="/purchase-orders" method="post" class="purchase-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <div class="purchase-form-header">
+            <label>구매처 <b>*</b><select name="supplierId" required${inputState("supplierId", fieldErrors)}><option value="">구매처 선택</option>${supplierOptions}</select>${fieldError("supplierId", fieldErrors)}</label>
+            <label>입고 창고 <b>*</b><select name="warehouseId" required${inputState("warehouseId", fieldErrors)}><option value="">창고 선택</option>${warehouses.map((warehouse) => `<option value="${escapeHtml(warehouse.id)}"${values.warehouseId === warehouse.id ? " selected" : ""}>${escapeHtml(warehouse.name)}</option>`).join("")}</select>${fieldError("warehouseId", fieldErrors)}</label>
+            <label>발주일 <b>*</b><input name="orderDate" type="date" value="${escapeHtml(values.orderDate)}" required${inputState("orderDate", fieldErrors)}>${fieldError("orderDate", fieldErrors)}</label>
+            <label>입고 예정일<input name="expectedDate" type="date" value="${escapeHtml(values.expectedDate)}"${inputState("expectedDate", fieldErrors)}>${fieldError("expectedDate", fieldErrors)}</label>
+          </div>
+          ${fieldErrors.lines ? `<div class="inline-error">${escapeHtml(fieldErrors.lines)}</div>` : ""}
+          <div class="po-lines"><div class="po-line po-line-head"><span>품목</span><span>수량</span><span>발주 단가</span></div>
+            ${lines.map((line, index) => `<div class="po-line">
+              <label><span class="sr-only">${index + 1}번 품목</span><select name="lineItemId"${inputState(`line${index}ItemId`, fieldErrors)}><option value="">품목 선택</option>${itemOptions(line.itemId)}</select>${fieldError(`line${index}ItemId`, fieldErrors)}</label>
+              <label><span class="sr-only">${index + 1}번 수량</span><input name="lineQuantity" type="number" value="${escapeHtml(line.quantity)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState(`line${index}Quantity`, fieldErrors)}>${fieldError(`line${index}Quantity`, fieldErrors)}</label>
+              <label><span class="money-input"><input name="lineUnitPrice" type="number" value="${escapeHtml(line.unitPrice)}" placeholder="0" min="0" max="999999999999" step="1" inputmode="numeric"${inputState(`line${index}UnitPrice`, fieldErrors)}><i>원</i></span>${fieldError(`line${index}UnitPrice`, fieldErrors)}</label>
+            </div>`).join("")}
+          </div>
+          <div class="purchase-form-footer"><input name="note" value="${escapeHtml(values.note)}" placeholder="발주 메모 (선택)" maxlength="500"><button type="submit"${!prerequisitesReady ? " disabled" : ""}>발주 등록 <span aria-hidden="true">→</span></button></div>
+        </form>
+      </details>
+
+      <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고 현황</h2></div>${orderCards}</section>
     </section>`,
   });
 }
