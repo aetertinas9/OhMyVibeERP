@@ -710,6 +710,54 @@ function itemWithWarehouseStock(item) {
   };
 }
 
+function inventoryReplenishmentsForData(data) {
+  const outstandingByItem = new Map();
+  for (const order of data.purchaseOrders) {
+    for (const line of order.lines ?? []) {
+      const remaining = roundMoney(Math.max(
+        Number(line.quantity || 0) - Number(line.receivedQuantity || 0),
+        0,
+      ));
+      outstandingByItem.set(line.itemId, roundMoney(
+        (outstandingByItem.get(line.itemId) ?? 0) + remaining,
+      ));
+    }
+  }
+
+  return data.items
+    .map(itemWithWarehouseStock)
+    .filter((item) => Number(item.safetyStock || 0) > item.openingStock)
+    .map((item) => {
+      const safetyStock = Number(item.safetyStock);
+      const outstandingPurchaseQuantity = outstandingByItem.get(item.id) ?? 0;
+      const shortageQuantity = roundMoney(safetyStock - item.openingStock);
+      const suggestedQuantity = roundMoney(Math.max(shortageQuantity - outstandingPurchaseQuantity, 0));
+      const suggestedWarehouse = WAREHOUSES.reduce((lowest, warehouse) => (
+        item.stockByWarehouse[warehouse.id] < item.stockByWarehouse[lowest.id] ? warehouse : lowest
+      ));
+      return {
+        itemId: item.id,
+        itemCode: item.code,
+        itemName: item.name,
+        unit: item.unit,
+        purchasePrice: Number(item.purchasePrice || 0),
+        stockByWarehouse: item.stockByWarehouse,
+        totalStock: item.openingStock,
+        safetyStock,
+        shortageQuantity,
+        outstandingPurchaseQuantity,
+        projectedStock: roundMoney(item.openingStock + outstandingPurchaseQuantity),
+        suggestedQuantity,
+        suggestedWarehouseId: suggestedWarehouse.id,
+      };
+    })
+    .sort((left, right) => (
+      right.suggestedQuantity - left.suggestedQuantity
+      || right.shortageQuantity - left.shortageQuantity
+      || left.itemCode.localeCompare(right.itemCode)
+    ));
+}
+
 export class MasterDataRepository {
   constructor({
     load = async () => emptyData(),
@@ -777,6 +825,11 @@ export class MasterDataRepository {
       || right.adjustedAt.localeCompare(left.adjustedAt)
       || right.number.localeCompare(left.number)
     )));
+  }
+
+  async inventoryReplenishmentSuggestions() {
+    const data = await this.data();
+    return copy(inventoryReplenishmentsForData(data));
   }
 
   async listEmployees() {
@@ -1478,57 +1531,80 @@ export class MasterDataRepository {
 
   async createPurchaseOrder(input, actorId) {
     const validated = validatePurchaseOrderInput(input);
-    return this.mutate((data) => {
-      assertOpenPeriod(data, validated.orderDate);
-      const supplier = data.partners.find((partner) => (
-        partner.id === validated.supplierId && partner.type === "purchases"
-      ));
-      if (!supplier) throw new InputValidationError({ supplierId: "등록된 구매처를 선택해 주세요." });
+    return this.mutate((data) => this.createPurchaseOrderRecord(data, validated, actorId));
+  }
 
-      const seenItemIds = new Set();
-      const lines = validated.lines.map((line, index) => {
-        const item = data.items.find((candidate) => candidate.id === line.itemId);
-        if (!item) throw new InputValidationError({ [`line${index}ItemId`]: "등록된 품목을 선택해 주세요." });
-        if (seenItemIds.has(item.id)) {
-          throw new InputValidationError({ [`line${index}ItemId`]: "같은 품목은 한 발주에 한 번만 추가할 수 있습니다." });
-        }
-        seenItemIds.add(item.id);
-        return {
-          id: `po_line_${this.createId()}`,
-          itemId: item.id,
-          quantity: line.quantity,
-          unitPrice: line.unitPrice,
-          receivedQuantity: 0,
-          returnedQuantity: 0,
-        };
-      });
-
-      const dateKey = validated.orderDate.replaceAll("-", "");
-      const prefix = `PO-${dateKey}-`;
-      const sequence = data.purchaseOrders.filter(({ number }) => number?.startsWith(prefix)).length + 1;
-      const timestamp = this.now().toISOString();
-      const record = {
-        id: `purchase_order_${this.createId()}`,
-        number: `${prefix}${String(sequence).padStart(3, "0")}`,
-        supplierId: supplier.id,
-        warehouseId: validated.warehouseId,
-        orderDate: validated.orderDate,
-        expectedDate: validated.expectedDate,
-        status: "ordered",
-        lines,
-        totalAmount: lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0),
-        payableAmount: 0,
-        paidAmount: 0,
-        supplierRefundReceivableAmount: 0,
-        note: validated.note,
-        receipts: [],
-        returns: [],
-        createdAt: timestamp,
-        createdBy: actorId,
-      };
-      data.purchaseOrders.unshift(record);
-      return record;
+  async createReplenishmentPurchaseOrder(input, actorId) {
+    const validated = validatePurchaseOrderInput({
+      ...input,
+      lines: [{ itemId: input.itemId, quantity: "1", unitPrice: input.unitPrice }],
     });
+    return this.mutate((data) => {
+      const itemExists = data.items.some(({ id }) => id === validated.lines[0].itemId);
+      if (!itemExists) throw new InputValidationError({ itemId: "등록된 품목을 선택해 주세요." });
+      const suggestion = inventoryReplenishmentsForData(data)
+        .find(({ itemId }) => itemId === validated.lines[0].itemId);
+      if (!suggestion) {
+        throw new BusinessRuleError("현재고가 안전재고 이상이어서 추가 발주가 필요하지 않습니다.");
+      }
+      if (suggestion.suggestedQuantity <= 0) {
+        throw new BusinessRuleError("이미 진행 중인 미입고 발주로 안전재고를 채울 수 있습니다.");
+      }
+      validated.lines[0].quantity = suggestion.suggestedQuantity;
+      return this.createPurchaseOrderRecord(data, validated, actorId);
+    });
+  }
+
+  createPurchaseOrderRecord(data, validated, actorId) {
+    assertOpenPeriod(data, validated.orderDate);
+    const supplier = data.partners.find((partner) => (
+      partner.id === validated.supplierId && partner.type === "purchases"
+    ));
+    if (!supplier) throw new InputValidationError({ supplierId: "등록된 구매처를 선택해 주세요." });
+
+    const seenItemIds = new Set();
+    const lines = validated.lines.map((line, index) => {
+      const item = data.items.find((candidate) => candidate.id === line.itemId);
+      if (!item) throw new InputValidationError({ [`line${index}ItemId`]: "등록된 품목을 선택해 주세요." });
+      if (seenItemIds.has(item.id)) {
+        throw new InputValidationError({ [`line${index}ItemId`]: "같은 품목은 한 발주에 한 번만 추가할 수 있습니다." });
+      }
+      seenItemIds.add(item.id);
+      return {
+        id: `po_line_${this.createId()}`,
+        itemId: item.id,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        receivedQuantity: 0,
+        returnedQuantity: 0,
+      };
+    });
+
+    const dateKey = validated.orderDate.replaceAll("-", "");
+    const prefix = `PO-${dateKey}-`;
+    const sequence = data.purchaseOrders.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+    const timestamp = this.now().toISOString();
+    const record = {
+      id: `purchase_order_${this.createId()}`,
+      number: `${prefix}${String(sequence).padStart(3, "0")}`,
+      supplierId: supplier.id,
+      warehouseId: validated.warehouseId,
+      orderDate: validated.orderDate,
+      expectedDate: validated.expectedDate,
+      status: "ordered",
+      lines,
+      totalAmount: lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0),
+      payableAmount: 0,
+      paidAmount: 0,
+      supplierRefundReceivableAmount: 0,
+      note: validated.note,
+      receipts: [],
+      returns: [],
+      createdAt: timestamp,
+      createdBy: actorId,
+    };
+    data.purchaseOrders.unshift(record);
+    return record;
   }
 
   async receivePurchaseOrder(orderId, input, actorId) {
