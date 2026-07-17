@@ -7,6 +7,16 @@ const PASSWORD_KEY_LENGTH = 64;
 export const SESSION_COOKIE = "erp_session";
 export const LOGIN_CSRF_COOKIE = "erp_login_csrf";
 
+export const DEMO_ACCOUNTS = Object.freeze([
+  Object.freeze({ id: "usr_admin", username: "admin", displayName: "관리자", role: "시스템 관리자", department: "management" }),
+  Object.freeze({ id: "usr_sales", username: "sales", displayName: "영업 담당자", role: "영업 담당자", department: "sales" }),
+  Object.freeze({ id: "usr_purchase", username: "purchase", displayName: "구매 담당자", role: "구매 담당자", department: "purchasing" }),
+  Object.freeze({ id: "usr_production", username: "production", displayName: "생산 담당자", role: "생산 담당자", department: "production" }),
+  Object.freeze({ id: "usr_logistics", username: "logistics", displayName: "물류 담당자", role: "물류 담당자", department: "logistics" }),
+  Object.freeze({ id: "usr_finance", username: "finance", displayName: "재무 담당자", role: "재무 담당자", department: "finance" }),
+  Object.freeze({ id: "usr_hr", username: "hr", displayName: "인사 담당자", role: "인사·급여 담당자", department: "hr" }),
+]);
+
 export function normalizeUsername(value) {
   return String(value ?? "").trim().toLocaleLowerCase("en-US");
 }
@@ -44,7 +54,34 @@ export async function createCredentialStore({ username, password, displayName = 
         username: String(username),
         displayName,
         role: "시스템 관리자",
+        department: "management",
       };
+    },
+  };
+}
+
+export async function createDemoCredentialStore({
+  password = "ChangeMe123!",
+  accounts = DEMO_ACCOUNTS,
+} = {}) {
+  if (!password || !Array.isArray(accounts) || !accounts.length) {
+    throw new Error("체험 계정과 비밀번호가 필요합니다.");
+  }
+  const accountMap = new Map(accounts.map((account) => [normalizeUsername(account.username), { ...account }]));
+  if (accountMap.size !== accounts.length || accountMap.has("")) throw new Error("체험 계정 아이디가 중복되었거나 비어 있습니다.");
+
+  const salt = randomBytes(16);
+  const passwordHash = await derivePassword(password, salt);
+  const dummySalt = randomBytes(16);
+  const dummyHash = await derivePassword(randomBytes(24).toString("base64url"), dummySalt);
+
+  return {
+    async verify(candidateUsername, candidatePassword) {
+      const account = accountMap.get(normalizeUsername(candidateUsername));
+      const candidateHash = await derivePassword(candidatePassword, account ? salt : dummySalt);
+      const expectedHash = account ? passwordHash : dummyHash;
+      if (!timingSafeEqual(candidateHash, expectedHash)) return null;
+      return { ...account };
     },
   };
 }
