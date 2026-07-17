@@ -27,6 +27,7 @@ const emptyData = () => ({
   salesOrders: [],
   billsOfMaterials: [],
   productionOrders: [],
+  inventoryTransfers: [],
   employees: createSyntheticEmployees(),
   payrollRuns: [],
   periodClosures: [],
@@ -456,6 +457,49 @@ function validateReturnInput(input, type) {
   };
 }
 
+function validateInventoryTransferInput(input) {
+  const errors = {};
+  const sourceWarehouseId = requiredText(
+    input.sourceWarehouseId, "sourceWarehouseId", "출발 창고", 30, errors,
+  );
+  const destinationWarehouseId = requiredText(
+    input.destinationWarehouseId, "destinationWarehouseId", "도착 창고", 30, errors,
+  );
+  if (sourceWarehouseId && !WAREHOUSES.some(({ id }) => id === sourceWarehouseId)) {
+    errors.sourceWarehouseId = "등록된 출발 창고를 선택해 주세요.";
+  }
+  if (destinationWarehouseId && !WAREHOUSES.some(({ id }) => id === destinationWarehouseId)) {
+    errors.destinationWarehouseId = "등록된 도착 창고를 선택해 주세요.";
+  }
+  if (
+    sourceWarehouseId
+    && destinationWarehouseId
+    && sourceWarehouseId === destinationWarehouseId
+    && !errors.sourceWarehouseId
+    && !errors.destinationWarehouseId
+  ) {
+    errors.destinationWarehouseId = "도착 창고는 출발 창고와 달라야 합니다.";
+  }
+  const transferDate = dateValue(input.transferDate, "transferDate", "이동일", errors, { required: true });
+  const submittedLines = (Array.isArray(input.lines) ? input.lines : []).filter((line) => (
+    cleanText(line?.itemId, 120) || String(line?.quantity ?? "").trim()
+  ));
+  if (!submittedLines.length) errors.lines = "이동할 품목을 하나 이상 입력해 주세요.";
+  if (submittedLines.length > 20) errors.lines = "이동 품목은 최대 20개까지 입력할 수 있습니다.";
+  const lines = submittedLines.slice(0, 20).map((line, index) => ({
+    itemId: requiredText(line.itemId, `line${index}ItemId`, "품목", 120, errors),
+    quantity: positiveQuantity(line.quantity, `line${index}Quantity`, "이동 수량", errors),
+  }));
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return {
+    sourceWarehouseId,
+    destinationWarehouseId,
+    transferDate,
+    note: cleanText(input.note, 300),
+    lines,
+  };
+}
+
 function validateBillOfMaterialsInput(input) {
   const errors = {};
   const productItemId = requiredText(input.productItemId, "productItemId", "완제품", 120, errors);
@@ -590,6 +634,7 @@ function validateStoredData(value) {
     || (value.salesOrders !== undefined && !Array.isArray(value.salesOrders))
     || (value.billsOfMaterials !== undefined && !Array.isArray(value.billsOfMaterials))
     || (value.productionOrders !== undefined && !Array.isArray(value.productionOrders))
+    || (value.inventoryTransfers !== undefined && !Array.isArray(value.inventoryTransfers))
     || (value.employees !== undefined && !Array.isArray(value.employees))
     || (value.payrollRuns !== undefined && !Array.isArray(value.payrollRuns))
     || (value.periodClosures !== undefined && !Array.isArray(value.periodClosures))
@@ -603,6 +648,7 @@ function validateStoredData(value) {
     salesOrders: value.salesOrders ?? [],
     billsOfMaterials: value.billsOfMaterials ?? [],
     productionOrders: value.productionOrders ?? [],
+    inventoryTransfers: value.inventoryTransfers ?? [],
     employees: value.employees ?? createSyntheticEmployees(),
     payrollRuns: value.payrollRuns ?? [],
     periodClosures: value.periodClosures ?? [],
@@ -672,6 +718,15 @@ export class MasterDataRepository {
   async listProductionOrders() {
     const data = await this.data();
     return copy(data.productionOrders);
+  }
+
+  async listInventoryTransfers() {
+    const data = await this.data();
+    return copy([...data.inventoryTransfers].sort((left, right) => (
+      right.transferDate.localeCompare(left.transferDate)
+      || right.transferredAt.localeCompare(left.transferredAt)
+      || right.number.localeCompare(left.number)
+    )));
   }
 
   async listEmployees() {
@@ -1121,6 +1176,66 @@ export class MasterDataRepository {
       transactions: [...purchases, ...sales, ...purchaseReturns, ...salesReturns].sort((left, right) => (
         right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
       )),
+    });
+  }
+
+  async createInventoryTransfer(input, actorId) {
+    const validated = validateInventoryTransferInput(input);
+    return this.mutate((data) => {
+      assertOpenPeriod(data, validated.transferDate);
+      const errors = {};
+      const seenItemIds = new Set();
+      const movements = validated.lines.map((line, index) => {
+        const item = data.items.find(({ id }) => id === line.itemId);
+        if (!item) {
+          errors[`line${index}ItemId`] = "등록된 품목을 선택해 주세요.";
+          return null;
+        }
+        if (seenItemIds.has(item.id)) {
+          errors[`line${index}ItemId`] = "같은 품목은 한 이동 문서에 한 번만 추가할 수 있습니다.";
+          return null;
+        }
+        seenItemIds.add(item.id);
+        const normalized = itemWithWarehouseStock(item);
+        const available = normalized.stockByWarehouse[validated.sourceWarehouseId];
+        if (line.quantity > available) {
+          errors[`line${index}Quantity`] = `출발 창고 재고 ${available.toLocaleString("ko-KR")}보다 많이 이동할 수 없습니다.`;
+        }
+        const destinationStock = normalized.stockByWarehouse[validated.destinationWarehouseId];
+        if (line.quantity + destinationStock > MAX_QUANTITY) {
+          errors[`line${index}Quantity`] = `도착 창고 재고는 ${MAX_QUANTITY.toLocaleString("ko-KR")}을(를) 초과할 수 없습니다.`;
+        }
+        return { item, normalized, quantity: line.quantity };
+      }).filter(Boolean);
+      if (Object.keys(errors).length) throw new InputValidationError(errors);
+
+      for (const movement of movements) {
+        movement.normalized.stockByWarehouse[validated.sourceWarehouseId] = roundMoney(
+          movement.normalized.stockByWarehouse[validated.sourceWarehouseId] - movement.quantity,
+        );
+        movement.normalized.stockByWarehouse[validated.destinationWarehouseId] = roundMoney(
+          movement.normalized.stockByWarehouse[validated.destinationWarehouseId] + movement.quantity,
+        );
+        movement.item.stockByWarehouse = movement.normalized.stockByWarehouse;
+        movement.item.openingStock = totalWarehouseStock(movement.normalized.stockByWarehouse);
+      }
+
+      const dateKey = validated.transferDate.replaceAll("-", "");
+      const prefix = `TR-${dateKey}-`;
+      const sequence = data.inventoryTransfers.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const record = {
+        id: `inventory_transfer_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        sourceWarehouseId: validated.sourceWarehouseId,
+        destinationWarehouseId: validated.destinationWarehouseId,
+        transferDate: validated.transferDate,
+        lines: movements.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
+        note: validated.note,
+        transferredAt: this.now().toISOString(),
+        transferredBy: cleanText(actorId, 120),
+      };
+      data.inventoryTransfers.unshift(record);
+      return record;
     });
   }
 
