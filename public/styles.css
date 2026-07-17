@@ -519,6 +519,7 @@ button, input { font: inherit; }
 .inventory-total { min-width: 160px; padding: 13px 17px; border: 1px solid #d9dcd6; border-radius: 8px; background: rgba(255,255,255,.5); text-align: right; }
 .inventory-total span { display: block; color: #87928e; font-size: 9px; }
 .inventory-total strong { display: block; margin-top: 3px; color: var(--green); font-size: 24px; }
+.inventory-total strong small { margin-left: 3px; color: #87928e; font-size: 10px; font-weight: 500; }
 
 .warehouse-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
 .warehouse-card { position: relative; min-height: 174px; overflow: hidden; padding: 22px 24px; border: 1px solid #dcddd7; border-radius: 10px; background: rgba(255,255,255,.64); box-shadow: 0 7px 22px rgba(36,54,48,.04); }

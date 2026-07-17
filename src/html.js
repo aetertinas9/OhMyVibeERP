@@ -451,17 +451,16 @@ export function itemPage({
 }
 
 export function inventoryPage({ user, csrfToken, items, warehouses }) {
-  const warehouseTotals = Object.fromEntries(warehouses.map(({ id }) => [
+  const warehouseItemCounts = Object.fromEntries(warehouses.map(({ id }) => [
     id,
-    Math.round(items.reduce((total, item) => total + Number(item.stockByWarehouse[id] || 0), 0) * 100) / 100,
+    items.filter((item) => Number(item.stockByWarehouse[id] || 0) > 0).length,
   ]));
-  const grandTotal = Math.round(Object.values(warehouseTotals).reduce((total, quantity) => total + quantity, 0) * 100) / 100;
   const warehouseCards = warehouses.map((warehouse, index) => `
     <article class="warehouse-card ${escapeHtml(warehouse.id)}">
       <div class="warehouse-card-top"><span>0${index + 1}</span><i></i></div>
       <p>${escapeHtml(warehouse.code)}</p>
       <h2>${escapeHtml(warehouse.name)}</h2>
-      <strong>${escapeHtml(Number(warehouseTotals[warehouse.id]).toLocaleString("ko-KR", { maximumFractionDigits: 2 }))}<small> 총 수량</small></strong>
+      <strong>${escapeHtml(warehouseItemCounts[warehouse.id])}<small> 보관 품목</small></strong>
     </article>`).join("");
   const rows = items.length
     ? items.map((item) => {
@@ -488,7 +487,7 @@ export function inventoryPage({ user, csrfToken, items, warehouses }) {
           <h1>창고별 재고 현황</h1>
           <p>품목별로 서울·인천·부산 창고에 보관된 수량을 확인합니다.</p>
         </div>
-        <div class="inventory-total"><span>전체 재고 수량</span><strong>${escapeHtml(grandTotal.toLocaleString("ko-KR", { maximumFractionDigits: 2 }))}</strong></div>
+        <div class="inventory-total"><span>등록 품목</span><strong>${escapeHtml(items.length)}<small>개</small></strong></div>
       </header>
 
       <div class="warehouse-grid">${warehouseCards}</div>

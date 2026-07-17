@@ -67,7 +67,9 @@ test("품목별 서울·인천·부산 수량과 전체 재고를 표시한다",
   assert.match(page.body, /7.5 EA/);
   assert.match(page.body, /40 EA/);
   assert.match(page.body, /안전재고 이하/);
-  assert.match(page.body, />41</);
+  assert.match(page.body, /서울 창고[\s\S]*?<strong>2<small> 보관 품목/);
+  assert.match(page.body, /인천 창고[\s\S]*?<strong>1<small> 보관 품목/);
+  assert.doesNotMatch(page.body, />41</);
 });
 
 test("품목이 없으면 창고 카드와 빈 재고 안내를 표시한다", async () => {
