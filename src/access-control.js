@@ -14,11 +14,13 @@ export const PERMISSIONS = Object.freeze({
   SALES_ORDERS_VIEW: "sales.orders.view",
   SALES_ORDERS_CREATE: "sales.orders.create",
   SALES_SHIP: "sales.ship",
+  SALES_RETURN: "sales.return",
   PURCHASE_PARTNERS: "purchase.partners",
   ITEMS_MANAGE: "items.manage",
   PURCHASE_ORDERS_VIEW: "purchase.orders.view",
   PURCHASE_ORDERS_CREATE: "purchase.orders.create",
   PURCHASE_RECEIVE: "purchase.receive",
+  PURCHASE_RETURN: "purchase.return",
   INVENTORY_VIEW: "inventory.view",
   PRODUCTION_MANAGE: "production.manage",
   FINANCE_REPORT: "finance.report",
@@ -54,8 +56,10 @@ const departmentPermissions = Object.freeze({
     PERMISSIONS.HOME,
     PERMISSIONS.PURCHASE_ORDERS_VIEW,
     PERMISSIONS.PURCHASE_RECEIVE,
+    PERMISSIONS.PURCHASE_RETURN,
     PERMISSIONS.SALES_ORDERS_VIEW,
     PERMISSIONS.SALES_SHIP,
+    PERMISSIONS.SALES_RETURN,
     PERMISSIONS.INVENTORY_VIEW,
   ]),
   finance: new Set([
@@ -96,10 +100,12 @@ export function permissionForRequest(method, pathname) {
     return method === "POST" ? PERMISSIONS.PURCHASE_ORDERS_CREATE : PERMISSIONS.PURCHASE_ORDERS_VIEW;
   }
   if (/^\/purchase-orders\/[^/]+\/receive$/.test(pathname)) return PERMISSIONS.PURCHASE_RECEIVE;
+  if (/^\/purchase-orders\/[^/]+\/return$/.test(pathname)) return PERMISSIONS.PURCHASE_RETURN;
   if (pathname === "/sales-orders") {
     return method === "POST" ? PERMISSIONS.SALES_ORDERS_CREATE : PERMISSIONS.SALES_ORDERS_VIEW;
   }
   if (/^\/sales-orders\/[^/]+\/ship$/.test(pathname)) return PERMISSIONS.SALES_SHIP;
+  if (/^\/sales-orders\/[^/]+\/return$/.test(pathname)) return PERMISSIONS.SALES_RETURN;
   if (pathname === "/production" || pathname === "/production/boms" || pathname === "/production/orders") {
     return PERMISSIONS.PRODUCTION_MANAGE;
   }

@@ -611,7 +611,10 @@ export function purchaseOrdersPage({
   error = "",
   created = false,
   received = false,
+  returned = false,
+  today = "",
   receiptOrderId = "",
+  returnOrderId = "",
 }) {
   const supplierMap = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
   const itemMap = new Map(items.map((item) => [item.id, item]));
@@ -620,6 +623,7 @@ export function purchaseOrdersPage({
   const prerequisitesReady = suppliers.length > 0 && items.length > 0;
   const canCreatePurchase = canAccess(user, PERMISSIONS.PURCHASE_ORDERS_CREATE);
   const canReceive = canAccess(user, PERMISSIONS.PURCHASE_RECEIVE);
+  const canReturn = canAccess(user, PERMISSIONS.PURCHASE_RETURN);
   const canViewPurchaseAmounts = canCreatePurchase;
 
   const supplierOptions = suppliers.map((supplier) => (
@@ -635,13 +639,17 @@ export function purchaseOrdersPage({
       const warehouse = warehouseMap.get(order.warehouseId);
       const status = orderStatus[order.status] ?? orderStatus.ordered;
       const receiptErrors = receiptOrderId === order.id ? fieldErrors : {};
+      const returnErrors = returnOrderId === order.id ? fieldErrors : {};
       const orderLines = order.lines.map((line) => {
         const item = itemMap.get(line.itemId);
         const remaining = Math.round((line.quantity - line.receivedQuantity) * 100) / 100;
+        const netReceived = Math.round((line.receivedQuantity - line.returnedQuantity) * 100) / 100;
         return `<tr>
           <td><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><small>${escapeHtml(item?.code ?? line.itemId)} · ${escapeHtml(item?.unit ?? "")}</small></td>
           <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
           <td><strong class="received-quantity">${escapeHtml(formatQuantity(line.receivedQuantity, item?.unit ?? ""))}</strong></td>
+          <td><strong>${escapeHtml(formatQuantity(line.returnedQuantity, item?.unit ?? ""))}</strong></td>
+          <td>${escapeHtml(formatQuantity(netReceived, item?.unit ?? ""))}</td>
           <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
           <td class="number-cell">${canViewPurchaseAmounts ? escapeHtml(formatMoney(line.unitPrice)) : "—"}</td>
           <td class="number-cell">${canViewPurchaseAmounts ? escapeHtml(formatMoney(line.quantity * line.unitPrice)) : "—"}</td>
@@ -670,14 +678,44 @@ export function purchaseOrdersPage({
           </form>`
         : `<div class="receipt-complete"><span aria-hidden="true">✓</span><div><strong>모든 품목의 입고가 완료됐습니다.</strong><p>${escapeHtml(formatDate(order.receivedAt))} · ${escapeHtml(warehouse?.name ?? "")}</p></div></div>`;
 
+      const hasReturnableQuantity = order.lines.some((line) => line.receivedQuantity - line.returnedQuantity > 0);
+      const returnFields = !hasReturnableQuantity
+        ? ""
+        : !canReturn
+          ? `<div class="restricted-action"><span aria-hidden="true">↗</span><div><strong>구매 반품 출고는 물류 부서 업무입니다.</strong><p>반품 이력과 금액은 조회할 수 있지만 창고 재고 차감은 물류 계정에서만 실행합니다.</p></div></div>`
+          : `<form action="/purchase-orders/${escapeHtml(order.id)}/return" method="post" class="receipt-form return-form purchase-return-form">
+              <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+              <div class="receipt-heading"><div><span>PURCHASE RETURN</span><h3>구매 반품 출고</h3></div><p>불량품을 공급처로 보내면 ${escapeHtml(warehouse?.name ?? "입고 창고")} 재고와 줄 돈이 함께 줄어듭니다.</p></div>
+              ${returnErrors.return ? `<div class="inline-error">${escapeHtml(returnErrors.return)}</div>` : ""}
+              <div class="receipt-inputs">
+                ${order.lines.map((line) => {
+                  const item = itemMap.get(line.itemId);
+                  const returnable = Math.round((line.receivedQuantity - line.returnedQuantity) * 100) / 100;
+                  if (returnable <= 0) return "";
+                  const available = Number(item?.stockByWarehouse?.[order.warehouseId] || 0);
+                  const field = `return_${line.id}`;
+                  return `<label><span>${escapeHtml(item?.name ?? "품목")} <small>반품 가능 ${escapeHtml(formatQuantity(returnable, item?.unit ?? ""))} · 재고 ${escapeHtml(formatQuantity(available, item?.unit ?? ""))}</small></span>
+                    <input name="${escapeHtml(field)}" type="number" placeholder="0" min="0" max="${escapeHtml(Math.min(returnable, available))}" step="0.01" inputmode="decimal"${inputState(field, returnErrors)}>
+                    ${fieldError(field, returnErrors)}
+                  </label>`;
+                }).join("")}
+              </div>
+              <div class="receipt-actions return-actions"><label>반품일<input name="returnDate" type="date" value="${escapeHtml(today)}" required${inputState("returnDate", returnErrors)}>${fieldError("returnDate", returnErrors)}</label><input name="returnNote" placeholder="불량 사유·반품 메모 (선택)" maxlength="300"><button type="submit">반품 출고 <span aria-hidden="true">→</span></button></div>
+            </form>`;
+      const returnHistory = order.returns.length
+        ? `<section class="return-history"><h3>구매 반품 이력 <small>${order.returns.length.toLocaleString("ko-KR")}건</small></h3>${order.returns.map((returnRecord) => `<article data-return-record="${escapeHtml(returnRecord.number)}"><header><strong>${escapeHtml(returnRecord.number)}</strong><span>${escapeHtml(formatDate(returnRecord.returnDate))}${canViewPurchaseAmounts ? ` · ${escapeHtml(formatMoney(returnRecord.amount))}` : ""}</span></header><p>${returnRecord.lines.map((returnLine) => { const line = order.lines.find(({ id }) => id === returnLine.lineId); const item = itemMap.get(line?.itemId); return `${escapeHtml(item?.name ?? "삭제된 품목")} ${escapeHtml(formatQuantity(returnLine.quantity, item?.unit ?? ""))}`; }).join(" · ")}</p><small>${escapeHtml(returnRecord.note || "반품 메모 없음")}</small></article>`).join("")}</section>`
+        : "";
+
       return `<article class="purchase-order-card">
         <header>
           <div><span class="order-number">${escapeHtml(order.number)}</span><h2>${escapeHtml(supplier?.name ?? "알 수 없는 구매처")}</h2><p>${escapeHtml(supplier?.code ?? "")} · ${escapeHtml(warehouse?.name ?? order.warehouseId)} 입고</p></div>
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>발주일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>입고 예정</dt><dd>${escapeHtml(order.expectedDate ? formatDate(order.expectedDate) : "미정")}</dd></div></dl></div>
         </header>
-        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>발주</th><th>입고</th><th>미입고</th><th>단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewPurchaseAmounts ? `<div><p>발주합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>입고금액 <strong>${escapeHtml(formatMoney(order.receivedAmount))}</strong></p><p>지급금액 <strong>${escapeHtml(formatMoney(order.paidAmount))}</strong></p><p class="payable-amount">줄 금액 <strong>${escapeHtml(formatMoney(order.payableAmount))}</strong></p></div>` : "발주 금액은 구매 부서 전용"}</div>
+        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>발주</th><th>입고</th><th>반품</th><th>순입고</th><th>미입고</th><th>단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
+        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewPurchaseAmounts ? `<div><p>발주합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>입고금액 <strong>${escapeHtml(formatMoney(order.receivedAmount))}</strong></p><p>반품금액 <strong>${escapeHtml(formatMoney(order.returnedAmount))}</strong></p><p>순매입 <strong>${escapeHtml(formatMoney(order.netPurchaseAmount))}</strong></p><p>지급금액 <strong>${escapeHtml(formatMoney(order.paidAmount))}</strong></p><p class="payable-amount">줄 금액 <strong>${escapeHtml(formatMoney(order.payableAmount))}</strong></p>${order.supplierRefundReceivableAmount > 0 ? `<p class="receivable-amount">공급처 환급 예정 <strong>${escapeHtml(formatMoney(order.supplierRefundReceivableAmount))}</strong></p>` : ""}</div>` : "발주 금액은 구매 부서 전용"}</div>
         ${receiptFields}
+        ${returnFields}
+        ${returnHistory}
       </article>`;
     }).join("")
     : `<div class="order-empty"><span aria-hidden="true">▦</span><h2>등록된 발주가 없습니다.</h2><p>구매처와 입고 창고를 선택해 첫 발주를 등록해 보세요.</p></div>`;
@@ -688,6 +726,8 @@ export function purchaseOrdersPage({
       ? `<div class="form-notice success" role="status">발주 등록을 완료했습니다.</div>`
       : received
         ? `<div class="form-notice success" role="status">입고 수량을 재고에 반영했습니다.</div>`
+        : returned
+          ? `<div class="form-notice success" role="status">구매 반품을 출고하고 재고와 줄 돈을 차감했습니다.</div>`
         : "";
 
   return workspacePage({
@@ -700,7 +740,7 @@ export function purchaseOrdersPage({
       ${notice}
       ${canCreatePurchase && !prerequisitesReady ? `<div class="prerequisite-notice"><strong>발주 전에 기준정보가 필요합니다.</strong><p>${!suppliers.length ? "구매처" : ""}${!suppliers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
 
-      ${canCreatePurchase ? `<details class="purchase-create"${!orders.length || error && !receiptOrderId ? " open" : ""}>
+      ${canCreatePurchase ? `<details class="purchase-create"${!orders.length || error && !receiptOrderId && !returnOrderId ? " open" : ""}>
         <summary><span><i>NEW</i><strong>새 발주 등록</strong></span><em>구매처·입고 창고·품목 선택</em></summary>
         <form action="/purchase-orders" method="post" class="purchase-form">
           <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
@@ -722,7 +762,7 @@ export function purchaseOrdersPage({
         </form>
       </details>` : ""}
 
-      <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고 현황</h2></div>${orderCards}</section>
+      <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고·반품 현황</h2></div>${orderCards}</section>
     </section>`,
   });
 }
@@ -907,7 +947,10 @@ export function salesOrdersPage({
   error = "",
   created = false,
   shipped = false,
+  returned = false,
+  today = "",
   shipmentOrderId = "",
+  returnOrderId = "",
 }) {
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const itemMap = new Map(items.map((item) => [item.id, item]));
@@ -917,6 +960,7 @@ export function salesOrdersPage({
   const totalReceivable = Math.round(orders.reduce((total, order) => total + Number(order.receivableAmount || 0), 0) * 100) / 100;
   const canCreateSales = canAccess(user, PERMISSIONS.SALES_ORDERS_CREATE);
   const canShip = canAccess(user, PERMISSIONS.SALES_SHIP);
+  const canReturn = canAccess(user, PERMISSIONS.SALES_RETURN);
   const canViewSalesAmounts = canCreateSales;
 
   const customerOptions = customers.map((customer) => (
@@ -932,13 +976,17 @@ export function salesOrdersPage({
       const warehouse = warehouseMap.get(order.warehouseId);
       const status = salesOrderStatus[order.status] ?? salesOrderStatus.ordered;
       const shipmentErrors = shipmentOrderId === order.id ? fieldErrors : {};
+      const returnErrors = returnOrderId === order.id ? fieldErrors : {};
       const orderLines = order.lines.map((line) => {
         const item = itemMap.get(line.itemId);
         const remaining = Math.round((line.quantity - line.shippedQuantity) * 100) / 100;
+        const netShipped = Math.round((line.shippedQuantity - line.returnedQuantity) * 100) / 100;
         return `<tr>
           <td><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><small>${escapeHtml(item?.code ?? line.itemId)} · ${escapeHtml(item?.unit ?? "")}</small></td>
           <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
           <td><strong class="shipped-quantity">${escapeHtml(formatQuantity(line.shippedQuantity, item?.unit ?? ""))}</strong></td>
+          <td><strong>${escapeHtml(formatQuantity(line.returnedQuantity, item?.unit ?? ""))}</strong></td>
+          <td>${escapeHtml(formatQuantity(netShipped, item?.unit ?? ""))}</td>
           <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
           <td class="number-cell">${canViewSalesAmounts ? escapeHtml(formatMoney(line.unitPrice)) : "—"}</td>
           <td class="number-cell">${canViewSalesAmounts ? escapeHtml(formatMoney(line.quantity * line.unitPrice)) : "—"}</td>
@@ -968,14 +1016,43 @@ export function salesOrdersPage({
           </form>`
         : `<div class="receipt-complete shipment-complete"><span aria-hidden="true">✓</span><div><strong>모든 품목의 출고가 완료됐습니다.</strong><p>${escapeHtml(formatDate(order.shippedAt))} · 받을 금액 ${escapeHtml(formatMoney(order.receivableAmount))}</p></div></div>`;
 
+      const hasReturnableQuantity = order.lines.some((line) => line.shippedQuantity - line.returnedQuantity > 0);
+      const returnFields = !hasReturnableQuantity
+        ? ""
+        : !canReturn
+          ? `<div class="restricted-action"><span aria-hidden="true">↙</span><div><strong>판매 반품 입고는 물류 부서 업무입니다.</strong><p>반품 이력과 금액은 조회할 수 있지만 창고 재고 증가는 물류 계정에서만 실행합니다.</p></div></div>`
+          : `<form action="/sales-orders/${escapeHtml(order.id)}/return" method="post" class="receipt-form return-form sales-return-form">
+              <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+              <div class="receipt-heading"><div><span>SALES RETURN</span><h3>판매 반품 입고</h3></div><p>고객에게 돌아온 불량품을 받으면 ${escapeHtml(warehouse?.name ?? "출고 창고")} 재고가 늘고 받을 돈이 줄어듭니다.</p></div>
+              ${returnErrors.return ? `<div class="inline-error">${escapeHtml(returnErrors.return)}</div>` : ""}
+              <div class="receipt-inputs">
+                ${order.lines.map((line) => {
+                  const item = itemMap.get(line.itemId);
+                  const returnable = Math.round((line.shippedQuantity - line.returnedQuantity) * 100) / 100;
+                  if (returnable <= 0) return "";
+                  const field = `return_${line.id}`;
+                  return `<label><span>${escapeHtml(item?.name ?? "품목")} <small>반품 가능 ${escapeHtml(formatQuantity(returnable, item?.unit ?? ""))}</small></span>
+                    <input name="${escapeHtml(field)}" type="number" placeholder="0" min="0" max="${escapeHtml(returnable)}" step="0.01" inputmode="decimal"${inputState(field, returnErrors)}>
+                    ${fieldError(field, returnErrors)}
+                  </label>`;
+                }).join("")}
+              </div>
+              <div class="receipt-actions return-actions"><label>반품일<input name="returnDate" type="date" value="${escapeHtml(today)}" required${inputState("returnDate", returnErrors)}>${fieldError("returnDate", returnErrors)}</label><input name="returnNote" placeholder="불량 사유·반품 메모 (선택)" maxlength="300"><button type="submit">반품 입고 <span aria-hidden="true">→</span></button></div>
+            </form>`;
+      const returnHistory = order.returns.length
+        ? `<section class="return-history"><h3>판매 반품 이력 <small>${order.returns.length.toLocaleString("ko-KR")}건</small></h3>${order.returns.map((returnRecord) => `<article data-return-record="${escapeHtml(returnRecord.number)}"><header><strong>${escapeHtml(returnRecord.number)}</strong><span>${escapeHtml(formatDate(returnRecord.returnDate))}${canViewSalesAmounts ? ` · ${escapeHtml(formatMoney(returnRecord.amount))}` : ""}</span></header><p>${returnRecord.lines.map((returnLine) => { const line = order.lines.find(({ id }) => id === returnLine.lineId); const item = itemMap.get(line?.itemId); return `${escapeHtml(item?.name ?? "삭제된 품목")} ${escapeHtml(formatQuantity(returnLine.quantity, item?.unit ?? ""))}`; }).join(" · ")}</p><small>${escapeHtml(returnRecord.note || "반품 메모 없음")}</small></article>`).join("")}</section>`
+        : "";
+
       return `<article class="purchase-order-card sales-order-card">
         <header>
           <div><span class="order-number">${escapeHtml(order.number)}</span><h2>${escapeHtml(customer?.name ?? "알 수 없는 판매처")}</h2><p>${escapeHtml(customer?.code ?? "")} · ${escapeHtml(warehouse?.name ?? order.warehouseId)} 출고</p></div>
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>주문일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>출고 요청</dt><dd>${escapeHtml(order.requestedShipDate ? formatDate(order.requestedShipDate) : "미정")}</dd></div></dl></div>
         </header>
-        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>주문</th><th>출고</th><th>미출고</th><th>판매 단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewSalesAmounts ? `<div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>출고금액 <strong>${escapeHtml(formatMoney(order.shippedAmount))}</strong></p><p>받은 금액 <strong>${escapeHtml(formatMoney(order.collectedAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div>` : `<p>주문·채권 금액은 영업 부서 전용</p>`}</div>
+        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>주문</th><th>출고</th><th>반품</th><th>순출고</th><th>미출고</th><th>판매 단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
+        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewSalesAmounts ? `<div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p>출고금액 <strong>${escapeHtml(formatMoney(order.shippedAmount))}</strong></p><p>반품금액 <strong>${escapeHtml(formatMoney(order.returnedAmount))}</strong></p><p>순매출 <strong>${escapeHtml(formatMoney(order.netSalesAmount))}</strong></p><p>받은 금액 <strong>${escapeHtml(formatMoney(order.collectedAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p>${order.customerRefundPayableAmount > 0 ? `<p class="payable-amount">고객 환불 예정 <strong>${escapeHtml(formatMoney(order.customerRefundPayableAmount))}</strong></p>` : ""}</div>` : `<p>주문·채권 금액은 영업 부서 전용</p>`}</div>
         ${shipmentFields}
+        ${returnFields}
+        ${returnHistory}
       </article>`;
     }).join("")
     : `<div class="order-empty"><span aria-hidden="true">↗</span><h2>접수된 판매 주문이 없습니다.</h2><p>판매처와 출고 창고를 선택해 첫 주문을 등록해 보세요.</p></div>`;
@@ -986,6 +1063,8 @@ export function salesOrdersPage({
       ? `<div class="form-notice success" role="status">판매 주문 등록을 완료했습니다.</div>`
       : shipped
         ? `<div class="form-notice success" role="status">출고 수량을 재고와 받을 금액에 반영했습니다.</div>`
+        : returned
+          ? `<div class="form-notice success" role="status">판매 반품을 입고하고 재고와 받을 돈을 조정했습니다.</div>`
         : "";
 
   return workspacePage({
@@ -998,7 +1077,7 @@ export function salesOrdersPage({
       ${notice}
       ${canCreateSales && !prerequisitesReady ? `<div class="prerequisite-notice"><strong>주문 전에 기준정보가 필요합니다.</strong><p>${!customers.length ? "판매처" : ""}${!customers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
 
-      ${canCreateSales ? `<details class="purchase-create sales-create"${!orders.length || error && !shipmentOrderId ? " open" : ""}>
+      ${canCreateSales ? `<details class="purchase-create sales-create"${!orders.length || error && !shipmentOrderId && !returnOrderId ? " open" : ""}>
         <summary><span><i>NEW</i><strong>새 판매 주문 등록</strong></span><em>판매처·출고 창고·품목 선택</em></summary>
         <form action="/sales-orders" method="post" class="purchase-form">
           <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
@@ -1020,7 +1099,7 @@ export function salesOrdersPage({
         </form>
       </details>` : ""}
 
-      <section class="orders-section"><div class="orders-title"><p>ORDER & SHIPMENT</p><h2>주문·출고 현황</h2></div>${orderCards}</section>
+      <section class="orders-section"><div class="orders-title"><p>ORDER & SHIPMENT</p><h2>주문·출고·반품 현황</h2></div>${orderCards}</section>
     </section>`,
   });
 }
@@ -1159,11 +1238,12 @@ export function settlementsPage({
       <td class="number-cell">${escapeHtml(formatMoney(partner.transactionAmount))}</td>
       <td class="number-cell settled">${escapeHtml(formatMoney(partner.settledAmount))}</td>
       <td class="number-cell balance ${partner.balance > 0 ? "open" : "clear"}"><strong>${escapeHtml(formatMoney(partner.balance))}</strong></td>
+      <td class="number-cell balance ${partner.refundBalance > 0 ? "open" : "clear"}"><strong>${escapeHtml(formatMoney(partner.refundBalance))}</strong></td>
       <td>${partner.documentCount ? `<span class="open-document-count">${partner.documentCount.toLocaleString("ko-KR")}건</span>` : `<span class="cleared-label">정산 완료</span>`}</td>
     </tr>`).join("");
     return `<section class="partner-balance-card ${isCollection ? "receivable" : "payable"}" aria-labelledby="${type}-partner-title">
       <header><div><p>${isCollection ? "ACCOUNTS RECEIVABLE" : "ACCOUNTS PAYABLE"}</p><h2 id="${type}-partner-title">${isCollection ? "판매처별 받을 돈" : "구매처별 줄 돈"}</h2></div><strong>${balances.length.toLocaleString("ko-KR")}<small>개 거래처</small></strong></header>
-      ${balances.length ? `<div class="table-scroll"><table><thead><tr><th>거래처</th><th>${isCollection ? "출고금액" : "입고금액"}</th><th>${isCollection ? "받은 금액" : "지급금액"}</th><th>${isCollection ? "받을 돈" : "줄 돈"}</th><th>미결 문서</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="settlement-empty compact"><strong>${isCollection ? "등록된 판매처" : "등록된 구매처"}가 없습니다.</strong></div>`}
+      ${balances.length ? `<div class="table-scroll"><table><thead><tr><th>거래처</th><th>반품 차감 후 ${isCollection ? "판매" : "매입"}</th><th>${isCollection ? "받은 금액" : "지급금액"}</th><th>${isCollection ? "받을 돈" : "줄 돈"}</th><th>${isCollection ? "고객 환불 예정" : "공급처 환급 예정"}</th><th>미결 문서</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="settlement-empty compact"><strong>${isCollection ? "등록된 판매처" : "등록된 구매처"}가 없습니다.</strong></div>`}
     </section>`;
   };
 
@@ -1189,6 +1269,10 @@ export function settlementsPage({
     const isCollection = transaction.type === "collection";
     return `<tr data-settlement-transaction="${escapeHtml(transaction.number)}"><td><span class="settlement-type ${isCollection ? "collection" : "payment"}">${isCollection ? "입금" : "지급"}</span></td><td><strong>${escapeHtml(formatDate(transaction.transactionDate))}</strong><small>${escapeHtml(transaction.number)}</small></td><td><strong>${escapeHtml(transaction.partnerName)}</strong><small>${escapeHtml(transaction.partnerCode)}</small></td><td><strong>${escapeHtml(transaction.documentNumber)}</strong></td><td class="number-cell settlement-transaction-amount ${isCollection ? "collection" : "payment"}">${isCollection ? "+" : "-"}${escapeHtml(formatMoney(transaction.amount))}</td><td>${escapeHtml(transaction.note || "메모 없음")}</td></tr>`;
   }).join("");
+  const refundRows = [
+    ...overview.customerRefundDocuments.map((document) => ({ ...document, type: "customer" })),
+    ...overview.supplierRefundDocuments.map((document) => ({ ...document, type: "supplier" })),
+  ].map((document) => `<tr data-refund-document="${escapeHtml(document.id)}"><td><span class="settlement-type ${document.type === "customer" ? "payment" : "collection"}">${document.type === "customer" ? "고객 환불" : "공급처 환급"}</span></td><td><strong>${escapeHtml(document.partnerName)}</strong><small>${escapeHtml(document.partnerCode)}</small></td><td><strong>${escapeHtml(document.number)}</strong><small>${escapeHtml(formatDate(document.documentDate))}</small></td><td class="number-cell balance open"><strong>${escapeHtml(formatMoney(document.balance))}</strong></td></tr>`).join("");
   const notice = error
     ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
     : recorded === "collection"
@@ -1205,10 +1289,11 @@ export function settlementsPage({
     content: `<section class="settlements-content">
       <header class="settlements-heading"><div><p class="form-kicker">RECEIVABLES & PAYABLES</p><h1>받을 돈 · 줄 돈</h1><p>실제 입금과 지급을 기록하고 거래처별 남은 금액을 확인합니다.</p></div><div class="settlement-asof"><span>기준일</span><strong>${escapeHtml(formatDate(today))}</strong></div></header>
       ${notice}
-      <section class="settlement-kpis" aria-label="채권 채무 합계"><article class="receivable"><span>전체 받을 돈</span><strong>${escapeHtml(formatMoney(overview.receivableTotal))}</strong><p>미수 판매 주문 ${overview.receivableDocuments.length.toLocaleString("ko-KR")}건</p></article><article class="payable"><span>전체 줄 돈</span><strong>${escapeHtml(formatMoney(overview.payableTotal))}</strong><p>미지급 구매 발주 ${overview.payableDocuments.length.toLocaleString("ko-KR")}건</p></article><article class="net"><span>받을 돈 - 줄 돈</span><strong>${overview.receivableTotal - overview.payableTotal >= 0 ? "+" : "-"}${escapeHtml(formatMoney(Math.abs(overview.receivableTotal - overview.payableTotal)))}</strong><p>현금잔액이나 회계상 순자산이 아닌 단순 잔액 차이</p></article></section>
-      <aside class="settlement-basis"><span aria-hidden="true">i</span><p><strong>실제 입출고 기준입니다.</strong> 판매 출고 시 받을 돈, 구매 입고 시 줄 돈이 생깁니다. 재무가 입금·지급을 기록하면 해당 문서와 거래처 잔액이 함께 줄어듭니다.</p></aside>
+      <section class="settlement-kpis" aria-label="채권 채무 합계"><article class="receivable"><span>전체 받을 돈</span><strong>${escapeHtml(formatMoney(overview.receivableTotal))}</strong><p>미수 판매 주문 ${overview.receivableDocuments.length.toLocaleString("ko-KR")}건 · 공급처 환급 예정 ${escapeHtml(formatMoney(overview.supplierRefundReceivableTotal))}</p></article><article class="payable"><span>전체 줄 돈</span><strong>${escapeHtml(formatMoney(overview.payableTotal))}</strong><p>미지급 구매 발주 ${overview.payableDocuments.length.toLocaleString("ko-KR")}건 · 고객 환불 예정 ${escapeHtml(formatMoney(overview.customerRefundPayableTotal))}</p></article><article class="net"><span>받을 돈 - 줄 돈</span><strong>${overview.receivableTotal - overview.payableTotal >= 0 ? "+" : "-"}${escapeHtml(formatMoney(Math.abs(overview.receivableTotal - overview.payableTotal)))}</strong><p>반품 환불·환급 예정액은 위 보조 금액으로 별도 표시</p></article></section>
+      <aside class="settlement-basis"><span aria-hidden="true">i</span><p><strong>실제 입출고와 반품 기준입니다.</strong> 판매 반품은 받을 돈을, 구매 반품은 줄 돈을 먼저 줄입니다. 이미 정산한 금액을 넘으면 고객 환불 예정액 또는 공급처 환급 예정액으로 보존됩니다.</p></aside>
       <div class="partner-balance-grid">${partnerTable("collection", overview.customerBalances)}${partnerTable("payment", overview.supplierBalances)}</div>
       <section class="open-settlements" aria-labelledby="open-settlements-title"><header><div><p>OPEN DOCUMENTS</p><h2 id="open-settlements-title">입금 · 지급 처리</h2></div><span>잔액이 있는 문서만 표시</span></header><div class="open-settlement-columns"><section><h3>받을 돈 <small>${overview.receivableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("collection", overview.receivableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>받을 돈이 없습니다.</strong><p>출고 후 아직 입금되지 않은 문서가 없습니다.</p></div>`}</section><section><h3>줄 돈 <small>${overview.payableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("payment", overview.payableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>줄 돈이 없습니다.</strong><p>입고 후 아직 지급하지 않은 문서가 없습니다.</p></div>`}</section></div></section>
+      ${refundRows ? `<section class="settlement-history return-settlement-history" aria-labelledby="return-settlement-title"><header><div><p>RETURN SETTLEMENTS</p><h2 id="return-settlement-title">반품 환불 · 환급 예정액</h2></div><span>총 <strong>${(overview.customerRefundDocuments.length + overview.supplierRefundDocuments.length).toLocaleString("ko-KR")}</strong>건</span></header><div class="table-scroll"><table><thead><tr><th>구분</th><th>거래처</th><th>원 문서</th><th>남은 금액</th></tr></thead><tbody>${refundRows}</tbody></table></div></section>` : ""}
       <section class="settlement-history" aria-labelledby="settlement-history-title"><header><div><p>CASH SETTLEMENT HISTORY</p><h2 id="settlement-history-title">최근 입금 · 지급 근거</h2></div><span>총 <strong>${overview.transactions.length.toLocaleString("ko-KR")}</strong>건</span></header>${transactionRows ? `<div class="table-scroll"><table><thead><tr><th>구분</th><th>처리일·번호</th><th>거래처</th><th>대상 문서</th><th>금액</th><th>메모</th></tr></thead><tbody>${transactionRows}</tbody></table></div>` : `<div class="settlement-empty"><span aria-hidden="true">◎</span><strong>입금·지급 이력이 없습니다.</strong><p>위 미결 문서에서 처리하면 근거가 여기에 남습니다.</p></div>`}</section>
     </section>`,
   });
@@ -1249,7 +1334,12 @@ export function monthlyTradeReportPage({
       : "";
 
   const transactionRows = summary.transactions.map((transaction) => {
-    const isPurchase = transaction.type === "purchase";
+    const typeMeta = {
+      purchase: { label: "구매 입고", className: "purchase", sign: "-" },
+      sale: { label: "판매 출고", className: "sale", sign: "+" },
+      purchase_return: { label: "구매 반품", className: "sale", sign: "+" },
+      sales_return: { label: "판매 반품", className: "purchase", sign: "-" },
+    }[transaction.type];
     const partner = partnerMap.get(transaction.partnerId);
     const warehouse = warehouseMap.get(transaction.warehouseId);
     const lineDetails = transaction.lines.map((line) => {
@@ -1257,12 +1347,12 @@ export function monthlyTradeReportPage({
       return `<div><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><span>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))} × ${escapeHtml(formatMoney(line.unitPrice))}</span><em>${escapeHtml(formatMoney(line.amount))}</em></div>`;
     }).join("");
     return `<tr>
-      <td><span class="trade-type ${isPurchase ? "purchase" : "sale"}">${isPurchase ? "구매 입고" : "판매 출고"}</span></td>
-      <td><strong>${escapeHtml(formatKoreanDateTime(transaction.occurredAt))}</strong><small>${escapeHtml(transaction.documentNumber)}</small></td>
+      <td><span class="trade-type ${typeMeta.className}">${typeMeta.label}</span></td>
+      <td><strong>${escapeHtml(formatKoreanDateTime(transaction.occurredAt))}</strong><small>${escapeHtml(transaction.documentNumber)}${transaction.sourceDocumentNumber ? ` · 원문서 ${escapeHtml(transaction.sourceDocumentNumber)}` : ""}</small></td>
       <td><strong>${escapeHtml(partner?.name ?? "알 수 없는 거래처")}</strong><small>${escapeHtml(partner?.code ?? transaction.partnerId)}</small></td>
       <td>${escapeHtml(warehouse?.name ?? transaction.warehouseId)}</td>
       <td class="trade-lines">${lineDetails}</td>
-      <td class="number-cell trade-amount ${isPurchase ? "purchase" : "sale"}">${isPurchase ? "-" : "+"}${escapeHtml(formatMoney(transaction.amount))}</td>
+      <td class="number-cell trade-amount ${typeMeta.className}">${typeMeta.sign}${escapeHtml(formatMoney(transaction.amount))}</td>
     </tr>`;
   }).join("");
 
@@ -1279,7 +1369,7 @@ export function monthlyTradeReportPage({
 
       ${periodNotice}
 
-      <aside class="report-basis"><span aria-hidden="true">i</span><p><strong>입고·출고 금액 기준입니다.</strong> 실제 지급·수금이나 부가세, 급여, 운임 등은 반영되지 않아 회계상 순이익과는 다릅니다.</p></aside>
+      <aside class="report-basis"><span aria-hidden="true">i</span><p><strong>입고·출고와 반품 금액 기준입니다.</strong> 반품일의 판매·구매 금액을 차감합니다. 실제 지급·수금이나 부가세, 급여, 운임 등은 반영되지 않아 회계상 순이익과는 다릅니다.</p></aside>
 
       <section class="period-close-card ${selectedIsClosed ? "closed" : canCloseSelected ? "closable" : "open"}" aria-labelledby="period-close-title" data-period-status="${selectedIsClosed ? "closed" : "open"}">
         <div class="period-close-icon" aria-hidden="true">${selectedIsClosed ? "▣" : "□"}</div>
@@ -1298,8 +1388,8 @@ export function monthlyTradeReportPage({
       </section>
 
       <section class="trade-summary" aria-label="${escapeHtml(monthLabel)} 금액 요약">
-        <article class="spent"><span>이번 달 쓴 금액</span><strong>${escapeHtml(formatMoney(summary.purchaseAmount))}</strong><p>구매 입고 ${summary.purchaseCount.toLocaleString("ko-KR")}건</p></article>
-        <article class="earned"><span>이번 달 번 금액</span><strong>${escapeHtml(formatMoney(summary.salesAmount))}</strong><p>판매 출고 ${summary.salesCount.toLocaleString("ko-KR")}건</p></article>
+        <article class="spent"><span>이번 달 쓴 금액</span><strong>${escapeHtml(formatMoney(summary.purchaseAmount))}</strong><p>구매 입고 ${summary.purchaseCount.toLocaleString("ko-KR")}건 · 반품 ${summary.purchaseReturnCount.toLocaleString("ko-KR")}건</p></article>
+        <article class="earned"><span>이번 달 번 금액</span><strong>${escapeHtml(formatMoney(summary.salesAmount))}</strong><p>판매 출고 ${summary.salesCount.toLocaleString("ko-KR")}건 · 반품 ${summary.salesReturnCount.toLocaleString("ko-KR")}건</p></article>
         <article class="difference ${isPositive ? "positive" : "negative"}"><span>매입·판매 차액</span><strong>${isPositive ? "+" : "-"}${escapeHtml(formatMoney(Math.abs(summary.differenceAmount)))}</strong><p>${escapeHtml(differenceMessage)}</p></article>
       </section>
 

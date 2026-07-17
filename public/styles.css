@@ -747,10 +747,10 @@ button, input { font: inherit; }
 .order-lines-table td > small { display: block; margin-top: 3px; color: #9ca5a1; font-size: 8px; }
 .received-quantity { color: #2f7548 !important; }
 .shipped-quantity { color: #326c86 !important; }
-.order-total { display: flex; align-items: center; justify-content: space-between; min-height: 53px; padding: 0 24px; border-top: 1px solid #e2e4de; color: #929b97; background: #fafaf7; font-size: 9px; }
+.order-total { display: flex; align-items: center; justify-content: space-between; min-height: 53px; padding: 10px 24px; border-top: 1px solid #e2e4de; color: #929b97; background: #fafaf7; font-size: 9px; }
 .order-total p { margin: 0; color: #6d7974; }
 .order-total p strong { margin-left: 8px; color: var(--green); font-size: 15px; }
-.order-total > div { display: flex; align-items: center; gap: 24px; }
+.order-total > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 24px; }
 .sales-order-total .receivable-amount { padding-left: 22px; border-left: 1px solid #d9ddd7; }
 .sales-order-total .receivable-amount strong { color: #aa6922; }
 .order-total .payable-amount { padding-left: 22px; border-left: 1px solid #d9ddd7; }
@@ -764,6 +764,19 @@ button, input { font: inherit; }
 .shipment-form .receipt-heading span { color: #397088; }
 .shipment-complete { color: #315f72; background: #ecf5f7; border-top-color: #d7e6ea; }
 .shipment-complete > span { background: #4a8196; }
+.return-form { background: #fff8ee; border-top-color: #ead8be; }
+.return-form .receipt-heading span { color: #aa6922; }
+.return-actions { grid-template-columns: 150px 1fr 130px; align-items: end; }
+.return-actions label { display: grid; gap: 6px; color: #52615b; font-size: 9px; font-weight: 600; }
+.return-history { padding: 18px 24px; border-top: 1px solid #e4ddd2; background: #fffcf7; }
+.return-history > h3 { margin: 0 0 10px; color: #735f45; font-size: 11px; }
+.return-history > h3 small { margin-left: 5px; color: #a59682; font-size: 8px; }
+.return-history article { display: grid; grid-template-columns: 1.1fr 1.5fr 1fr; align-items: center; gap: 14px; padding: 9px 0; border-top: 1px solid #eee5d8; color: #746b5f; font-size: 9px; }
+.return-history article header { display: grid; gap: 3px; }
+.return-history article header strong { color: #8b622e; font-family: ui-monospace,monospace; font-size: 9px; }
+.return-history article header span, .return-history article > small { color: #9c9081; font-size: 8px; }
+.return-history article p { margin: 0; }
+.return-settlement-history { margin-bottom: 30px; }
 
 /* Production */
 .production-content .form-kicker, .production-content .order-number, .production-content .orders-title p { color: #9b6bc1; }
@@ -818,7 +831,7 @@ button, input { font: inherit; }
   .purchase-content { padding: 40px 18px 65px; }
   .purchase-heading, .purchase-order-card > header, .receipt-heading { align-items: flex-start; flex-direction: column; }
   .purchase-form { padding: 18px; }
-  .purchase-form-header, .po-line, .purchase-form-footer, .receipt-inputs, .receipt-actions { grid-template-columns: 1fr; }
+  .purchase-form-header, .po-line, .purchase-form-footer, .receipt-inputs, .receipt-actions, .return-history article { grid-template-columns: 1fr; }
   .po-line-head { display: none; }
   .order-meta { width: 100%; justify-content: space-between; }
   .order-total > div { align-items: flex-end; flex-direction: column; gap: 7px; }

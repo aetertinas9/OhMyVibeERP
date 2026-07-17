@@ -611,8 +611,10 @@ export async function createRequestHandler({
         csrfToken: session.csrfToken,
         warehouses: WAREHOUSES,
         values: { orderDate: today() },
+        today: today(),
         created: url.searchParams.get("created") === "1",
         received: url.searchParams.get("received") === "1",
+        returned: url.searchParams.get("returned") === "1",
         ...view,
       }), {
         "Cache-Control": "no-store",
@@ -657,6 +659,7 @@ export async function createRequestHandler({
           csrfToken: session.csrfToken,
           warehouses: WAREHOUSES,
           values,
+          today: today(),
           fieldErrors: error.fieldErrors,
           error: error instanceof BusinessRuleError ? error.message : "발주 필수 항목과 수량을 확인해 주세요.",
           ...view,
@@ -700,9 +703,56 @@ export async function createRequestHandler({
           csrfToken: session.csrfToken,
           warehouses: WAREHOUSES,
           values: { orderDate: today() },
+          today: today(),
           fieldErrors: error.fieldErrors ?? {},
           error: error.message,
           receiptOrderId: receiptMatch[1],
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    const purchaseReturnMatch = url.pathname.match(/^\/purchase-orders\/([^/]+)\/return$/);
+    if (request.method === "POST" && purchaseReturnMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const input = {
+        returnDate: form.get("returnDate") ?? "",
+        note: form.get("returnNote") ?? "",
+        lines: [...form.entries()]
+          .filter(([name]) => name.startsWith("return_") && name !== "returnDate" && name !== "returnNote")
+          .map(([name, quantity]) => ({ lineId: name.slice("return_".length), quantity })),
+      };
+      try {
+        await masterData.returnPurchaseOrder(purchaseReturnMatch[1], input, session.user.id);
+        redirect(response, "/purchase-orders?returned=1", [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof BusinessRuleError)
+          && !(error instanceof RecordNotFoundError)
+        ) throw error;
+        const view = await purchaseOrderViewData();
+        send(response, error.statusCode, purchaseOrdersPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          values: { orderDate: today() },
+          today: input.returnDate || today(),
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          returnOrderId: purchaseReturnMatch[1],
           ...view,
         }), {
           "Cache-Control": "no-store",
@@ -723,8 +773,10 @@ export async function createRequestHandler({
         csrfToken: session.csrfToken,
         warehouses: WAREHOUSES,
         values: { orderDate: today() },
+        today: today(),
         created: url.searchParams.get("created") === "1",
         shipped: url.searchParams.get("shipped") === "1",
+        returned: url.searchParams.get("returned") === "1",
         ...view,
       }), {
         "Cache-Control": "no-store",
@@ -769,6 +821,7 @@ export async function createRequestHandler({
           csrfToken: session.csrfToken,
           warehouses: WAREHOUSES,
           values,
+          today: today(),
           fieldErrors: error.fieldErrors,
           error: error instanceof BusinessRuleError ? error.message : "주문 필수 항목과 수량을 확인해 주세요.",
           ...view,
@@ -812,9 +865,56 @@ export async function createRequestHandler({
           csrfToken: session.csrfToken,
           warehouses: WAREHOUSES,
           values: { orderDate: today() },
+          today: today(),
           fieldErrors: error.fieldErrors ?? {},
           error: error.message,
           shipmentOrderId: shipmentMatch[1],
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    const salesReturnMatch = url.pathname.match(/^\/sales-orders\/([^/]+)\/return$/);
+    if (request.method === "POST" && salesReturnMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const input = {
+        returnDate: form.get("returnDate") ?? "",
+        note: form.get("returnNote") ?? "",
+        lines: [...form.entries()]
+          .filter(([name]) => name.startsWith("return_") && name !== "returnDate" && name !== "returnNote")
+          .map(([name, quantity]) => ({ lineId: name.slice("return_".length), quantity })),
+      };
+      try {
+        await masterData.returnSalesOrder(salesReturnMatch[1], input, session.user.id);
+        redirect(response, "/sales-orders?returned=1", [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof BusinessRuleError)
+          && !(error instanceof RecordNotFoundError)
+        ) throw error;
+        const view = await salesOrderViewData();
+        send(response, error.statusCode, salesOrdersPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          values: { orderDate: today() },
+          today: input.returnDate || today(),
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          returnOrderId: salesReturnMatch[1],
           ...view,
         }), {
           "Cache-Control": "no-store",
