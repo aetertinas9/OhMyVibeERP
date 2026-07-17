@@ -275,7 +275,14 @@ export async function createRequestHandler({
         redirect(response, "/login", [], secure);
         return;
       }
-      send(response, 200, appPage({ user: session.user, csrfToken: session.csrfToken }), {
+      const asOfDate = today();
+      const dashboard = await masterData.executiveDashboard(asOfDate.slice(0, 7));
+      send(response, 200, appPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        dashboard,
+        asOfDate,
+      }), {
         "Cache-Control": "no-store",
         "Content-Type": "text/html; charset=utf-8",
       }, secure);

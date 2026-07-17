@@ -151,32 +151,60 @@ function workspacePage({ title, active, user, csrfToken, content }) {
   });
 }
 
-export function appPage({ user, csrfToken }) {
+export function appPage({ user, csrfToken, dashboard, asOfDate }) {
+  const [year, month] = dashboard.month.split("-").map(Number);
+  const lowStockItems = dashboard.lowStockItems.map((item) => `<article class="dashboard-stock-row" data-dashboard-low-stock>
+    <div class="dashboard-row-heading"><div><span class="record-code">${escapeHtml(item.code)}</span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "분류 미등록")} · ${escapeHtml(item.unit)}</small></div><span class="dashboard-alert-badge">${item.shortageQuantity > 0 ? `${escapeHtml(formatQuantity(item.shortageQuantity, item.unit))} 부족` : "안전재고 도달"}</span></div>
+    <div class="dashboard-stock-numbers"><span>현재 <strong>${escapeHtml(formatQuantity(item.totalStock, item.unit))}</strong></span><span>안전재고 <strong>${escapeHtml(formatQuantity(item.safetyStock, item.unit))}</strong></span></div>
+    <div class="dashboard-warehouse-line"><span>서울 ${escapeHtml(formatQuantity(item.stockByWarehouse.seoul, item.unit))}</span><span>인천 ${escapeHtml(formatQuantity(item.stockByWarehouse.incheon, item.unit))}</span><span>부산 ${escapeHtml(formatQuantity(item.stockByWarehouse.busan, item.unit))}</span></div>
+  </article>`).join("");
+  const recentSales = dashboard.recentSales.map((sale) => `<article class="dashboard-money-row" data-dashboard-sale>
+    <div><span class="record-code">${escapeHtml(sale.documentNumber)}</span><strong>${escapeHtml(sale.customerName)}</strong><small>${escapeHtml(formatDate(sale.occurredAt))} · ${escapeHtml(sale.warehouseName)}</small></div>
+    <strong>${escapeHtml(formatMoney(sale.amount))}</strong>
+  </article>`).join("");
+  const receivableOrders = dashboard.receivableOrders.map((order) => `<article class="dashboard-money-row receivable" data-dashboard-receivable>
+    <div><span class="record-code">${escapeHtml(order.number)}</span><strong>${escapeHtml(order.customerName)}</strong><small>${escapeHtml(order.lastShippedAt ? formatDate(order.lastShippedAt) : order.orderDate)} · ${escapeHtml(order.warehouseName)}</small></div>
+    <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong>
+  </article>`).join("");
+
   return workspacePage({
-    title: "홈",
+    title: "대표 대시보드",
     active: "home",
     user,
     csrfToken,
-    content: `<section class="workspace-content">
-            <p class="form-kicker">TODAY'S WORKSPACE</p>
-            <h1>${escapeHtml(user.displayName)}님, 안녕하세요.</h1>
-            <p class="workspace-intro">OhMyVibeERP에 안전하게 로그인했습니다.</p>
+    content: `<section class="executive-dashboard">
+      <header class="dashboard-heading">
+        <div><p class="form-kicker">MORNING BRIEF</p><h1>${escapeHtml(user.displayName)}님, 오늘 볼 숫자입니다.</h1><p>${escapeHtml(formatDate(asOfDate))} · OhMyVibeERP 실제 업무 데이터 기준</p></div>
+        <div class="dashboard-date"><span>${year}</span><strong>${String(month).padStart(2, "0")}</strong><small>MONTH</small></div>
+      </header>
 
-            <div class="welcome-card">
-              <div>
-                <span class="card-label">첫 번째 설정</span>
-                <h2>회사 업무를 시작할 준비가 됐어요.</h2>
-                <p>판매처·구매처와 품목을 등록해 회사의 거래 기준 정보를 준비할 수 있습니다.</p>
-              </div>
-              <div class="check-seal" aria-hidden="true">✓</div>
-            </div>
+      <section class="dashboard-kpis" aria-label="대표 핵심 지표">
+        <a class="dashboard-kpi low-stock" href="/inventory" data-dashboard-kpi="low-stock"><span><i aria-hidden="true">!</i> 재고 부족</span><strong>${dashboard.lowStockCount.toLocaleString("ko-KR")}<small>개 품목</small></strong><p>전체 ${dashboard.totalItemCount.toLocaleString("ko-KR")}개 중 안전재고 이하 <b>재고 보기 →</b></p></a>
+        <a class="dashboard-kpi monthly-sales" href="/reports/monthly?month=${escapeHtml(dashboard.month)}" data-dashboard-kpi="monthly-sales"><span><i aria-hidden="true">↗</i> ${month}월 매출</span><strong>${escapeHtml(formatMoney(dashboard.monthlySalesAmount))}</strong><p>이번 달 실제 출고 ${dashboard.monthlyShipmentCount.toLocaleString("ko-KR")}건 <b>매출 근거 →</b></p></a>
+        <a class="dashboard-kpi outstanding" href="/sales-orders" data-dashboard-kpi="receivable"><span><i aria-hidden="true">₩</i> 받을 돈</span><strong>${escapeHtml(formatMoney(dashboard.outstandingReceivableAmount))}</strong><p>출고 후 받을 금액 ${dashboard.receivableOrderCount.toLocaleString("ko-KR")}건 <b>주문 보기 →</b></p></a>
+      </section>
 
-            <div class="summary-grid" aria-label="업무 요약">
-              <article><span>오늘 매출</span><strong>—</strong><small>데이터 연결 전</small></article>
-              <article><span>처리할 발주</span><strong>—</strong><small>발주 관리에서 확인</small></article>
-              <article><span>재고 알림</span><strong>—</strong><small>데이터 연결 전</small></article>
-            </div>
-          </section>`,
+      <aside class="dashboard-basis"><span aria-hidden="true">i</span><p><strong>숫자 기준</strong> 매출은 한국 시간 이번 달의 실제 출고액입니다. 받을 돈은 출고로 누적된 금액이며 현재 수금 차감 기능은 포함하지 않습니다.</p></aside>
+
+      <div class="dashboard-detail-grid">
+        <section class="dashboard-panel stock-panel" aria-labelledby="dashboard-stock-title">
+          <header><div><p>STOCK ALERT</p><h2 id="dashboard-stock-title">먼저 채워야 할 재고</h2></div><a href="/inventory">전체 재고</a></header>
+          <div class="dashboard-panel-list">${lowStockItems || `<div class="dashboard-empty"><span aria-hidden="true">✓</span><strong>안전재고 이하 품목이 없습니다.</strong><p>전체 창고 합계가 안전재고보다 높습니다.</p></div>`}</div>
+        </section>
+
+        <div class="dashboard-money-stack">
+          <section class="dashboard-panel" aria-labelledby="dashboard-sales-title">
+            <header><div><p>MONTHLY SALES</p><h2 id="dashboard-sales-title">이번 달 최근 매출</h2></div><a href="/reports/monthly?month=${escapeHtml(dashboard.month)}">월간 보고서</a></header>
+            <div class="dashboard-panel-list compact">${recentSales || `<div class="dashboard-empty compact"><strong>이번 달 출고 매출이 없습니다.</strong><p>출고 처리 후 자동 표시됩니다.</p></div>`}</div>
+          </section>
+
+          <section class="dashboard-panel" aria-labelledby="dashboard-receivable-title">
+            <header><div><p>RECEIVABLES</p><h2 id="dashboard-receivable-title">받을 돈이 남은 주문</h2></div><a href="/sales-orders">주문·출고</a></header>
+            <div class="dashboard-panel-list compact">${receivableOrders || `<div class="dashboard-empty compact"><strong>받을 금액이 없습니다.</strong><p>출고된 판매 주문이 아직 없습니다.</p></div>`}</div>
+          </section>
+        </div>
+      </div>
+    </section>`,
   });
 }
 

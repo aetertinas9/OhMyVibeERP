@@ -52,7 +52,9 @@ test("로그인 성공 후 보호된 ERP 홈에 접근한다", async () => {
 
   const app = await request(handler, { path: "/app", headers: { cookie: sessionCookie } });
   assert.equal(app.statusCode, 200);
-  assert.match(app.body, /OhMyVibeERP에 안전하게 로그인했습니다/);
+  assert.match(app.body, /오늘 볼 숫자입니다/);
+  assert.match(app.body, /재고 부족/);
+  assert.match(app.body, /이번 달의 실제 출고액/);
   assert.match(app.body, /시스템 관리자/);
 });
 
