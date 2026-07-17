@@ -954,6 +954,45 @@ button, input { font: inherit; }
 .inventory-total span { display: block; color: #87928e; font-size: 9px; }
 .inventory-total strong { display: block; margin-top: 3px; color: var(--green); font-size: 24px; }
 .inventory-total strong small { margin-left: 3px; color: #87928e; font-size: 10px; font-weight: 500; }
+.inventory-replenishment { margin-bottom: 20px; overflow: hidden; border: 1px solid #e2c38f; border-radius: 11px; background: rgba(255,251,243,.82); box-shadow: 0 8px 26px rgba(98,67,27,.06); }
+.inventory-replenishment > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 21px 23px; border-bottom: 1px solid #ead8b8; }
+.inventory-replenishment > header p { margin: 0 0 5px; color: #af7128; font-size: 8px; font-weight: 800; letter-spacing: .14em; }
+.inventory-replenishment > header h2 { margin: 0; color: #4d4335; font-size: 17px; }
+.inventory-replenishment > header span { display: block; margin-top: 6px; color: #8d8273; font-size: 9px; }
+.inventory-replenishment > header > strong { color: #a56621; font-size: 22px; white-space: nowrap; }
+.inventory-replenishment > header > strong small { margin-left: 4px; color: #95897a; font-size: 8px; font-weight: 500; }
+.replenishment-list { display: grid; gap: 1px; background: #eadfcd; }
+.replenishment-item { padding: 19px 22px; background: #fffdf8; }
+.replenishment-item > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.replenishment-item > header > div { display: flex; align-items: baseline; gap: 10px; }
+.replenishment-item h3 { margin: 0; color: #3d4944; font-size: 13px; }
+.replenishment-item > header > strong { padding: 5px 8px; border-radius: 12px; color: #9a5817; background: #fff0d8; font-size: 9px; }
+.replenishment-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-top: 14px; }
+.replenishment-metrics span { padding: 9px 11px; border: 1px solid #ece2d3; border-radius: 6px; color: #918575; background: #fff; font-size: 8px; }
+.replenishment-metrics strong { display: block; margin-top: 4px; color: #554b3d; font-size: 12px; }
+.replenishment-metrics span:nth-child(2) strong { color: #9a6329; }
+.replenishment-metrics span:nth-child(3) strong { color: #3b7467; }
+.replenishment-warehouses { margin: 9px 1px 0; color: #91887b; font-size: 8px; }
+.replenishment-order-form { display: grid; grid-template-columns: 1.25fr 1fr 1fr .8fr 1.25fr 150px; align-items: end; gap: 9px; margin-top: 15px; padding-top: 14px; border-top: 1px dashed #dfcfb8; }
+.replenishment-order-form label { display: grid; gap: 6px; color: #5c554a; font-size: 8px; font-weight: 700; }
+.replenishment-order-form label b { color: #bd7021; }
+.replenishment-order-form input, .replenishment-order-form select { width: 100%; height: 39px; padding: 0 9px; border: 1px solid #ddd5c9; border-radius: 6px; outline: none; color: #394741; background: #fff; font-size: 9px; }
+.replenishment-order-form input:focus, .replenishment-order-form select:focus { border-color: #bd843f; box-shadow: 0 0 0 3px rgba(189,132,63,.11); }
+.replenishment-order-form [aria-invalid="true"] { border-color: #bf6a53; background: #fffafa; }
+.replenishment-order-form button { height: 39px; border: 0; border-radius: 6px; color: #fff; background: #a86823; cursor: pointer; font-size: 9px; font-weight: 800; }
+.replenishment-order-form button span { display: block; color: #ffe4bd; font-size: 7px; font-weight: 500; }
+.replenishment-order-form button b { margin-left: 4px; }
+.replenishment-covered, .replenishment-restricted { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 11px 13px; border-radius: 7px; font-size: 9px; }
+.replenishment-covered { color: #417064; background: #edf7f2; }
+.replenishment-restricted { color: #786b58; background: #f4f1eb; }
+.replenishment-covered span, .replenishment-restricted span { display: grid; place-items: center; flex: 0 0 auto; width: 21px; height: 21px; border-radius: 50%; color: #fff; background: #5f847a; font-size: 8px; }
+.replenishment-covered p, .replenishment-restricted p { margin: 0; }
+.replenishment-covered strong, .replenishment-restricted strong { margin-right: 4px; }
+.replenishment-restricted a { color: #9a611f; font-weight: 800; }
+.replenishment-empty { display: grid; place-items: center; min-height: 145px; padding: 25px; color: #8b8376; text-align: center; }
+.replenishment-empty > span { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 8px; border-radius: 50%; color: #fff; background: #5e8b78; }
+.replenishment-empty strong { color: #4f5d56; font-size: 10px; }
+.replenishment-empty p { margin: 5px 0 0; font-size: 8px; }
 .inventory-transfer-create { margin-bottom: 20px; overflow: hidden; border: 1px solid #d4ddd8; border-radius: 10px; background: rgba(255,255,255,.66); box-shadow: 0 7px 22px rgba(36,54,48,.04); }
 .inventory-transfer-create summary { display: flex; align-items: center; justify-content: space-between; min-height: 66px; padding: 0 22px; cursor: pointer; list-style: none; }
 .inventory-transfer-create summary::-webkit-details-marker { display: none; }
@@ -1049,6 +1088,9 @@ button, input { font: inherit; }
   .inventory-content { padding: 40px 18px 60px; }
   .inventory-heading { align-items: flex-start; flex-direction: column; }
   .inventory-total { width: 100%; text-align: left; }
+  .inventory-replenishment > header, .replenishment-item > header { align-items: flex-start; flex-direction: column; }
+  .replenishment-metrics { grid-template-columns: 1fr 1fr; }
+  .replenishment-order-form { grid-template-columns: 1fr; }
   .warehouse-grid { grid-template-columns: 1fr; }
   .warehouse-card { min-height: 150px; }
   .inventory-transfer-create summary { align-items: flex-start; flex-direction: column; justify-content: center; gap: 5px; }

@@ -102,6 +102,7 @@ export function permissionForRequest(method, pathname) {
   if (pathname === "/inventory") return PERMISSIONS.INVENTORY_VIEW;
   if (pathname === "/inventory/transfers") return PERMISSIONS.INVENTORY_TRANSFER;
   if (pathname === "/inventory/counts") return PERMISSIONS.INVENTORY_COUNT;
+  if (pathname === "/inventory/replenishments") return PERMISSIONS.PURCHASE_ORDERS_CREATE;
   if (pathname === "/purchase-orders") {
     return method === "POST" ? PERMISSIONS.PURCHASE_ORDERS_CREATE : PERMISSIONS.PURCHASE_ORDERS_VIEW;
   }

@@ -545,17 +545,25 @@ export function inventoryPage({
   warehouses,
   transfers = [],
   counts = [],
+  suppliers = [],
+  replenishments = [],
   values = {},
   fieldErrors = {},
   error = "",
   countValues = {},
   countFieldErrors = {},
   countError = "",
+  replenishmentValues = {},
+  replenishmentFieldErrors = {},
+  replenishmentError = "",
   transferred = false,
   counted = false,
+  replenishmentOrdered = false,
+  today = "",
 }) {
   const canTransfer = canAccess(user, PERMISSIONS.INVENTORY_TRANSFER);
   const canCount = canAccess(user, PERMISSIONS.INVENTORY_COUNT);
+  const canCreatePurchase = canAccess(user, PERMISSIONS.PURCHASE_ORDERS_CREATE);
   const itemMap = new Map(items.map((item) => [item.id, item]));
   const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
   const transferLines = Array.from({ length: 6 }, (_, index) => values.lines?.[index] ?? {});
@@ -585,6 +593,9 @@ export function inventoryPage({
     : `<tr><td colspan="6"><div class="empty-state"><span aria-hidden="true">◇</span><strong>재고를 확인할 품목이 없습니다.</strong><p>품목 관리에서 창고별 기초 재고를 등록해 주세요.</p></div></td></tr>`;
   const warehouseOptions = (selectedId) => warehouses.map((warehouse) => (
     `<option value="${escapeHtml(warehouse.id)}"${selectedId === warehouse.id ? " selected" : ""}>${escapeHtml(warehouse.name)}</option>`
+  )).join("");
+  const supplierOptions = (selectedId) => suppliers.map((supplier) => (
+    `<option value="${escapeHtml(supplier.id)}"${selectedId === supplier.id ? " selected" : ""}>${escapeHtml(supplier.code)} · ${escapeHtml(supplier.name)}</option>`
   )).join("");
   const itemOptions = (selectedId) => items.map((item) => (
     `<option value="${escapeHtml(item.id)}"${selectedId === item.id ? " selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)} (${warehouses.map((warehouse) => `${warehouse.location} ${formatQuantity(item.stockByWarehouse[warehouse.id], item.unit)}`).join(" · ")})</option>`
@@ -622,12 +633,51 @@ export function inventoryPage({
       <td>${escapeHtml(count.note || "실사 메모 없음")}</td>
     </tr>`;
   }).join("");
-  const notice = error || countError
-    ? `<div class="form-notice error" role="alert">${escapeHtml(error || countError)}</div>`
+  const replenishmentCards = replenishments.map((suggestion) => {
+    const isErrorTarget = replenishmentValues.itemId === suggestion.itemId;
+    const rowValues = isErrorTarget ? replenishmentValues : {
+      supplierId: "",
+      warehouseId: suggestion.suggestedWarehouseId,
+      expectedDate: "",
+      unitPrice: suggestion.purchasePrice,
+      note: "안전재고 자동 발주",
+    };
+    const rowErrors = isErrorTarget ? replenishmentFieldErrors : {};
+    let action;
+    if (suggestion.suggestedQuantity <= 0) {
+      action = `<div class="replenishment-covered"><span aria-hidden="true">✓</span><p><strong>추가 발주 불필요</strong> 진행 중인 미입고 발주로 안전재고를 채울 수 있습니다.</p></div>`;
+    } else if (!canCreatePurchase) {
+      action = `<div class="replenishment-restricted"><span aria-hidden="true">i</span><p><strong>구매 부서 발주 필요</strong> 권장량을 구매 담당자에게 전달해 주세요.</p></div>`;
+    } else if (!suppliers.length) {
+      action = `<div class="replenishment-restricted"><span aria-hidden="true">!</span><p><strong>구매처를 먼저 등록해 주세요.</strong> <a href="/partners/purchases">구매처 등록 바로가기 →</a></p></div>`;
+    } else {
+      action = `<form action="/inventory/replenishments" method="post" class="replenishment-order-form">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+        <input type="hidden" name="itemId" value="${escapeHtml(suggestion.itemId)}">
+        <input type="hidden" name="orderDate" value="${escapeHtml(today)}">
+        <label>구매처 <b>*</b><select name="supplierId" required${inputState("supplierId", rowErrors)}><option value="">구매처 선택</option>${supplierOptions(rowValues.supplierId)}</select>${fieldError("supplierId", rowErrors)}</label>
+        <label>입고 창고 <b>*</b><select name="warehouseId" required${inputState("warehouseId", rowErrors)}>${warehouseOptions(rowValues.warehouseId)}</select>${fieldError("warehouseId", rowErrors)}</label>
+        <label>입고 예정일<input name="expectedDate" type="date" value="${escapeHtml(rowValues.expectedDate)}" min="${escapeHtml(today)}"${inputState("expectedDate", rowErrors)}>${fieldError("expectedDate", rowErrors)}</label>
+        <label>발주 단가<input name="unitPrice" type="number" value="${escapeHtml(rowValues.unitPrice)}" min="0" max="999999999999" step="1" inputmode="numeric"${inputState("line0UnitPrice", rowErrors)}>${fieldError("line0UnitPrice", rowErrors)}</label>
+        <label>메모<input name="note" value="${escapeHtml(rowValues.note)}" maxlength="500"></label>
+        <button type="submit"><span>권장 ${escapeHtml(formatQuantity(suggestion.suggestedQuantity, suggestion.unit))}</span> 바로 발주 <b aria-hidden="true">→</b></button>
+      </form>`;
+    }
+    return `<article class="replenishment-item" data-replenishment-item="${escapeHtml(suggestion.itemId)}">
+      <header><div><span class="record-code">${escapeHtml(suggestion.itemCode)}</span><h3>${escapeHtml(suggestion.itemName)}</h3></div><strong>${suggestion.suggestedQuantity > 0 ? `추가 ${escapeHtml(formatQuantity(suggestion.suggestedQuantity, suggestion.unit))} 권장` : "미입고 발주 진행 중"}</strong></header>
+      <div class="replenishment-metrics"><span>현재고<strong>${escapeHtml(formatQuantity(suggestion.totalStock, suggestion.unit))}</strong></span><span>안전재고<strong>${escapeHtml(formatQuantity(suggestion.safetyStock, suggestion.unit))}</strong></span><span>미입고 발주<strong>${escapeHtml(formatQuantity(suggestion.outstandingPurchaseQuantity, suggestion.unit))}</strong></span><span>입고 후 예상<strong>${escapeHtml(formatQuantity(suggestion.projectedStock, suggestion.unit))}</strong></span></div>
+      <p class="replenishment-warehouses">서울 ${escapeHtml(formatQuantity(suggestion.stockByWarehouse.seoul, suggestion.unit))} · 인천 ${escapeHtml(formatQuantity(suggestion.stockByWarehouse.incheon, suggestion.unit))} · 부산 ${escapeHtml(formatQuantity(suggestion.stockByWarehouse.busan, suggestion.unit))}</p>
+      ${action}
+    </article>`;
+  }).join("");
+  const notice = error || countError || replenishmentError
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error || countError || replenishmentError)}</div>`
     : transferred
       ? `<div class="form-notice success" role="status">창고 이동을 완료해 출발·도착 재고를 함께 반영했습니다.</div>`
       : counted
         ? `<div class="form-notice success" role="status">재고 실사를 반영했습니다. 장부·실사·차이와 처리 이력을 함께 보관합니다.</div>`
+        : replenishmentOrdered
+          ? `<div class="form-notice success" role="status">권장 발주를 등록했습니다. 미입고 수량을 반영해 추가 권장량을 다시 계산했습니다.</div>`
       : "";
 
   return workspacePage({
@@ -646,6 +696,11 @@ export function inventoryPage({
       </header>
 
       ${notice}
+
+      <section class="inventory-replenishment" aria-labelledby="inventory-replenishment-title">
+        <header><div><p>AUTO REPLENISHMENT</p><h2 id="inventory-replenishment-title">안전재고 자동 발주 제안</h2><span>전체 현재고와 이미 발주한 미입고 수량을 합산해 추가로 필요한 수량만 권장합니다.</span></div><strong>${replenishments.length}<small>개 부족 품목</small></strong></header>
+        ${replenishmentCards ? `<div class="replenishment-list">${replenishmentCards}</div>` : `<div class="replenishment-empty"><span aria-hidden="true">✓</span><strong>안전재고 아래로 떨어진 품목이 없습니다.</strong><p>현재고가 안전재고 미만이 되면 품목과 추가 권장 발주량이 자동으로 표시됩니다.</p></div>`}
+      </section>
 
       ${canTransfer ? `<details class="inventory-transfer-create"${!transfers.length || error ? " open" : ""}>
         <summary><span><i>MOVE</i><strong>창고 간 재고 이동</strong></span><em>출발 차감 · 도착 증가 동시 처리</em></summary>

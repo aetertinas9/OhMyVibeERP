@@ -161,6 +161,16 @@ export async function createRequestHandler({
     ]);
     return { suppliers, items, orders };
   };
+  const inventoryViewData = async () => {
+    const [items, transfers, counts, suppliers, replenishments] = await Promise.all([
+      masterData.listItems(),
+      masterData.listInventoryTransfers(),
+      masterData.listInventoryCounts(),
+      masterData.listPartners("purchases"),
+      masterData.inventoryReplenishmentSuggestions(),
+    ]);
+    return { items, transfers, counts, suppliers, replenishments };
+  };
   const salesOrderViewData = async () => {
     const [customers, items, orders] = await Promise.all([
       masterData.listPartners("sales"),
@@ -437,22 +447,18 @@ export async function createRequestHandler({
         redirect(response, "/login", [], secure);
         return;
       }
-      const [items, transfers, counts] = await Promise.all([
-        masterData.listItems(),
-        masterData.listInventoryTransfers(),
-        masterData.listInventoryCounts(),
-      ]);
+      const view = await inventoryViewData();
       send(response, 200, inventoryPage({
         user: session.user,
         csrfToken: session.csrfToken,
-        items,
-        transfers,
-        counts,
+        ...view,
         warehouses: WAREHOUSES,
+        today: today(),
         values: { sourceWarehouseId: "seoul", destinationWarehouseId: "busan", transferDate: today() },
         countValues: { warehouseId: "seoul", countDate: today() },
         transferred: url.searchParams.get("transferred") === "1",
         counted: url.searchParams.get("counted") === "1",
+        replenishmentOrdered: url.searchParams.get("replenishmentOrdered") === "1",
       }), {
         "Cache-Control": "no-store",
         "Content-Type": "text/html; charset=utf-8",
@@ -487,18 +493,13 @@ export async function createRequestHandler({
         redirect(response, "/inventory?transferred=1", [], secure);
       } catch (error) {
         if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
-        const [items, transfers, counts] = await Promise.all([
-          masterData.listItems(),
-          masterData.listInventoryTransfers(),
-          masterData.listInventoryCounts(),
-        ]);
+        const view = await inventoryViewData();
         send(response, error.statusCode, inventoryPage({
           user: session.user,
           csrfToken: session.csrfToken,
-          items,
-          transfers,
-          counts,
+          ...view,
           warehouses: WAREHOUSES,
+          today: today(),
           values,
           countValues: { warehouseId: "seoul", countDate: today() },
           fieldErrors: error.fieldErrors ?? {},
@@ -537,22 +538,55 @@ export async function createRequestHandler({
         redirect(response, "/inventory?counted=1", [], secure);
       } catch (error) {
         if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
-        const [items, transfers, counts] = await Promise.all([
-          masterData.listItems(),
-          masterData.listInventoryTransfers(),
-          masterData.listInventoryCounts(),
-        ]);
+        const view = await inventoryViewData();
         send(response, error.statusCode, inventoryPage({
           user: session.user,
           csrfToken: session.csrfToken,
-          items,
-          transfers,
-          counts,
+          ...view,
           warehouses: WAREHOUSES,
+          today: today(),
           values: { sourceWarehouseId: "seoul", destinationWarehouseId: "busan", transferDate: today() },
           countValues,
           countFieldErrors: error.fieldErrors ?? {},
           countError: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/inventory/replenishments") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const replenishmentValues = Object.fromEntries([
+        "itemId", "supplierId", "warehouseId", "orderDate", "expectedDate", "unitPrice", "note",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createReplenishmentPurchaseOrder(replenishmentValues, session.user.id);
+        redirect(response, "/inventory?replenishmentOrdered=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
+        const view = await inventoryViewData();
+        send(response, error.statusCode, inventoryPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          ...view,
+          warehouses: WAREHOUSES,
+          today: today(),
+          values: { sourceWarehouseId: "seoul", destinationWarehouseId: "busan", transferDate: today() },
+          countValues: { warehouseId: "seoul", countDate: today() },
+          replenishmentValues,
+          replenishmentFieldErrors: error.fieldErrors ?? {},
+          replenishmentError: error.message,
         }), {
           "Cache-Control": "no-store",
           "Content-Type": "text/html; charset=utf-8",
@@ -1285,7 +1319,7 @@ export async function createRequestHandler({
     }
 
     const knownPath = [
-      "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/inventory/transfers", "/inventory/counts", "/purchase-orders", "/sales-orders",
+      "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/inventory/transfers", "/inventory/counts", "/inventory/replenishments", "/purchase-orders", "/sales-orders",
       "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/monthly/close", "/employees", "/payroll",
       "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
