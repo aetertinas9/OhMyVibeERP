@@ -15,7 +15,7 @@ export const WAREHOUSES = Object.freeze([
   Object.freeze({ id: "busan", code: "WH-BUS", name: "부산 창고", location: "부산" }),
 ]);
 
-const emptyData = () => ({ version: 1, partners: [], items: [], purchaseOrders: [] });
+const emptyData = () => ({ version: 1, partners: [], items: [], purchaseOrders: [], salesOrders: [] });
 const copy = (value) => structuredClone(value);
 const totalWarehouseStock = (stockByWarehouse) => (
   Math.round(Object.values(stockByWarehouse).reduce((total, quantity) => total + quantity, 0) * 100) / 100
@@ -222,6 +222,44 @@ function validatePurchaseOrderInput(input) {
   };
 }
 
+function validateSalesOrderInput(input) {
+  const errors = {};
+  const customerId = requiredText(input.customerId, "customerId", "판매처", 120, errors);
+  const warehouseId = requiredText(input.warehouseId, "warehouseId", "출고 창고", 30, errors);
+  if (warehouseId && !WAREHOUSES.some(({ id }) => id === warehouseId)) {
+    errors.warehouseId = "출고 창고를 선택해 주세요.";
+  }
+  const orderDate = dateValue(input.orderDate, "orderDate", "주문일", errors, { required: true });
+  const requestedShipDate = dateValue(input.requestedShipDate, "requestedShipDate", "출고 요청일", errors);
+  if (orderDate && requestedShipDate && requestedShipDate < orderDate) {
+    errors.requestedShipDate = "출고 요청일은 주문일 이후여야 합니다.";
+  }
+
+  const submittedLines = (Array.isArray(input.lines) ? input.lines : []).filter((line) => (
+    cleanText(line?.itemId, 120) || String(line?.quantity ?? "").trim() || String(line?.unitPrice ?? "").trim()
+  ));
+  if (!submittedLines.length) errors.lines = "주문 품목을 하나 이상 입력해 주세요.";
+  if (submittedLines.length > 20) errors.lines = "주문 품목은 최대 20개까지 입력할 수 있습니다.";
+
+  const lines = submittedLines.slice(0, 20).map((line, index) => ({
+    itemId: requiredText(line.itemId, `line${index}ItemId`, "품목", 120, errors),
+    quantity: positiveQuantity(line.quantity, `line${index}Quantity`, "주문 수량", errors),
+    unitPrice: numericValue(line.unitPrice, {
+      field: `line${index}UnitPrice`, label: "판매 단가", maximum: MAX_MONEY,
+    }, errors),
+  }));
+
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return {
+    customerId,
+    warehouseId,
+    orderDate,
+    requestedShipDate,
+    note: cleanText(input.note, 500),
+    lines,
+  };
+}
+
 function validateStoredData(value) {
   if (
     !value
@@ -229,10 +267,15 @@ function validateStoredData(value) {
     || !Array.isArray(value.partners)
     || !Array.isArray(value.items)
     || (value.purchaseOrders !== undefined && !Array.isArray(value.purchaseOrders))
+    || (value.salesOrders !== undefined && !Array.isArray(value.salesOrders))
   ) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
-  return { ...value, purchaseOrders: value.purchaseOrders ?? [] };
+  return {
+    ...value,
+    purchaseOrders: value.purchaseOrders ?? [],
+    salesOrders: value.salesOrders ?? [],
+  };
 }
 
 function itemWithWarehouseStock(item) {
@@ -282,6 +325,11 @@ export class MasterDataRepository {
   async listPurchaseOrders() {
     const data = await this.data();
     return copy(data.purchaseOrders);
+  }
+
+  async listSalesOrders() {
+    const data = await this.data();
+    return copy(data.salesOrders);
   }
 
   async createPartner(type, input, actorId) {
@@ -428,6 +476,124 @@ export class MasterDataRepository {
         receivedBy: actorId,
         note: cleanText(input.note, 300),
         lines: receiptLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
+      });
+      return order;
+    });
+  }
+
+  async createSalesOrder(input, actorId) {
+    const validated = validateSalesOrderInput(input);
+    return this.mutate((data) => {
+      const customer = data.partners.find((partner) => (
+        partner.id === validated.customerId && partner.type === "sales"
+      ));
+      if (!customer) throw new InputValidationError({ customerId: "등록된 판매처를 선택해 주세요." });
+
+      const seenItemIds = new Set();
+      const lines = validated.lines.map((line, index) => {
+        const item = data.items.find((candidate) => candidate.id === line.itemId);
+        if (!item) throw new InputValidationError({ [`line${index}ItemId`]: "등록된 품목을 선택해 주세요." });
+        if (seenItemIds.has(item.id)) {
+          throw new InputValidationError({ [`line${index}ItemId`]: "같은 품목은 한 주문에 한 번만 추가할 수 있습니다." });
+        }
+        seenItemIds.add(item.id);
+        return {
+          id: `so_line_${this.createId()}`,
+          itemId: item.id,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          shippedQuantity: 0,
+        };
+      });
+
+      const dateKey = validated.orderDate.replaceAll("-", "");
+      const prefix = `SO-${dateKey}-`;
+      const sequence = data.salesOrders.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const timestamp = this.now().toISOString();
+      const record = {
+        id: `sales_order_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        customerId: customer.id,
+        warehouseId: validated.warehouseId,
+        orderDate: validated.orderDate,
+        requestedShipDate: validated.requestedShipDate,
+        status: "ordered",
+        lines,
+        totalAmount: Math.round(lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0) * 100) / 100,
+        receivableAmount: 0,
+        note: validated.note,
+        shipments: [],
+        createdAt: timestamp,
+        createdBy: actorId,
+      };
+      data.salesOrders.unshift(record);
+      return record;
+    });
+  }
+
+  async shipSalesOrder(orderId, input, actorId) {
+    return this.mutate((data) => {
+      const order = data.salesOrders.find(({ id }) => id === orderId);
+      if (!order) throw new RecordNotFoundError("판매 주문을 찾을 수 없습니다.");
+      if (order.status === "shipped") throw new BusinessRuleError("이미 출고 완료된 주문입니다.");
+
+      const errors = {};
+      const submittedLines = Array.isArray(input.lines) ? input.lines : [];
+      const seenLineIds = new Set();
+      const shipmentLines = [];
+      for (const submitted of submittedLines) {
+        const lineId = cleanText(submitted?.lineId, 120);
+        const source = String(submitted?.quantity ?? "").trim();
+        if (!lineId || !source || Number(source) === 0) continue;
+        if (seenLineIds.has(lineId)) throw new BusinessRuleError("같은 주문 행을 중복 출고할 수 없습니다.");
+        seenLineIds.add(lineId);
+        const line = order.lines.find(({ id }) => id === lineId);
+        if (!line) throw new BusinessRuleError("주문에 없는 품목 행입니다.");
+        const field = `shipment_${lineId}`;
+        const quantity = positiveQuantity(source, field, "출고 수량", errors);
+        const remaining = Math.round((line.quantity - line.shippedQuantity) * 100) / 100;
+        if (!errors[field] && quantity > remaining) {
+          errors[field] = `미출고 수량 ${remaining.toLocaleString("ko-KR")}을(를) 초과할 수 없습니다.`;
+        }
+        const item = data.items.find(({ id }) => id === line.itemId);
+        if (!item) throw new BusinessRuleError("주문 품목이 삭제되어 출고할 수 없습니다.");
+        const normalized = itemWithWarehouseStock(item);
+        const available = normalized.stockByWarehouse[order.warehouseId];
+        if (!errors[field] && quantity > available) {
+          errors[field] = `현재 창고 재고 ${available.toLocaleString("ko-KR")}보다 많이 출고할 수 없습니다.`;
+        }
+        shipmentLines.push({ line, item, normalized, quantity, field });
+      }
+      if (!shipmentLines.length) errors.shipment = "출고 수량을 하나 이상 입력해 주세요.";
+      if (Object.keys(errors).length) throw new InputValidationError(errors);
+
+      let shipmentAmount = 0;
+      for (const shipmentLine of shipmentLines) {
+        shipmentLine.normalized.stockByWarehouse[order.warehouseId] = Math.round((
+          shipmentLine.normalized.stockByWarehouse[order.warehouseId] - shipmentLine.quantity
+        ) * 100) / 100;
+        shipmentLine.item.stockByWarehouse = shipmentLine.normalized.stockByWarehouse;
+        shipmentLine.item.openingStock = totalWarehouseStock(shipmentLine.normalized.stockByWarehouse);
+        shipmentLine.line.shippedQuantity = Math.round((
+          shipmentLine.line.shippedQuantity + shipmentLine.quantity
+        ) * 100) / 100;
+        shipmentAmount += shipmentLine.quantity * shipmentLine.line.unitPrice;
+      }
+
+      shipmentAmount = Math.round(shipmentAmount * 100) / 100;
+      const isComplete = order.lines.every((line) => line.shippedQuantity === line.quantity);
+      const timestamp = this.now().toISOString();
+      order.status = isComplete ? "shipped" : "partially_shipped";
+      order.receivableAmount = Math.round((order.receivableAmount + shipmentAmount) * 100) / 100;
+      order.updatedAt = timestamp;
+      if (isComplete) order.shippedAt = timestamp;
+      order.shipments.push({
+        id: `shipment_${this.createId()}`,
+        shippedAt: timestamp,
+        shippedBy: actorId,
+        amount: shipmentAmount,
+        note: cleanText(input.note, 300),
+        lines: shipmentLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
       });
       return order;
     });
