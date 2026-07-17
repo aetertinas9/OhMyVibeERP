@@ -10,9 +10,9 @@ const MAX_MONEY = 999_999_999_999;
 const MAX_QUANTITY = 999_999_999;
 
 export const WAREHOUSES = Object.freeze([
-  Object.freeze({ id: "seoul", name: "서울 창고", location: "서울" }),
-  Object.freeze({ id: "incheon", name: "인천 창고", location: "인천" }),
-  Object.freeze({ id: "busan", name: "부산 창고", location: "부산" }),
+  Object.freeze({ id: "seoul", code: "WH-SEO", name: "서울 창고", location: "서울" }),
+  Object.freeze({ id: "incheon", code: "WH-ICN", name: "인천 창고", location: "인천" }),
+  Object.freeze({ id: "busan", code: "WH-BUS", name: "부산 창고", location: "부산" }),
 ]);
 
 const emptyData = () => ({ version: 1, partners: [], items: [] });

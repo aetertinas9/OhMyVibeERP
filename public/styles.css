@@ -456,6 +456,14 @@ button, input { font: inherit; }
 .money-input { position: relative; display: block; }
 .money-input input { padding-right: 34px; }
 .money-input i { position: absolute; top: 50%; right: 12px; color: #8c9692; font-size: 10px; font-style: normal; font-weight: 500; transform: translateY(-50%); }
+.warehouse-stock-fields { margin: 0; padding: 16px; border: 1px solid #dfe2dc; border-radius: 8px; background: #f7f7f3; }
+.warehouse-stock-fields legend { padding: 0 6px; color: #40504a; font-size: 11px; font-weight: 700; }
+.warehouse-stock-fields > p { margin: -3px 0 14px; color: #929c97; font-size: 9px; }
+.warehouse-label { display: flex; align-items: center; gap: 6px; }
+.warehouse-label i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
+.warehouse-label i.seoul { background: #e09b3d; }
+.warehouse-label i.incheon { background: #3d8c7b; }
+.warehouse-label i.busan { background: #6975a5; }
 
 .primary-action { display: flex; align-items: center; justify-content: center; gap: 10px; height: 48px; margin-top: 2px; border: 0; border-radius: 7px; color: #fff; background: var(--green); cursor: pointer; font-size: 12px; font-weight: 700; box-shadow: 0 7px 16px rgba(21,58,51,.14); }
 .primary-action:hover { background: #1d4c43; }
@@ -500,4 +508,54 @@ button, input { font: inherit; }
   .form-row.two-columns { grid-template-columns: 1fr; }
   .form-row.three-columns { grid-template-columns: 1fr; }
   .form-hint { display: none; }
+}
+
+/* Warehouse inventory */
+.inventory-content { width: min(100%, 1400px); margin: 0 auto; padding: 54px 48px 72px; }
+.inventory-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 30px; }
+.inventory-heading .form-kicker { margin-bottom: 9px; }
+.inventory-heading h1 { margin: 0; color: var(--ink); font-size: clamp(28px, 3vw, 40px); letter-spacing: -.045em; }
+.inventory-heading > div > p:last-child { margin: 9px 0 0; color: #74817c; font-size: 13px; }
+.inventory-total { min-width: 160px; padding: 13px 17px; border: 1px solid #d9dcd6; border-radius: 8px; background: rgba(255,255,255,.5); text-align: right; }
+.inventory-total span { display: block; color: #87928e; font-size: 9px; }
+.inventory-total strong { display: block; margin-top: 3px; color: var(--green); font-size: 24px; }
+
+.warehouse-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+.warehouse-card { position: relative; min-height: 174px; overflow: hidden; padding: 22px 24px; border: 1px solid #dcddd7; border-radius: 10px; background: rgba(255,255,255,.64); box-shadow: 0 7px 22px rgba(36,54,48,.04); }
+.warehouse-card::after { content: ""; position: absolute; right: -38px; bottom: -55px; width: 145px; height: 145px; border: 1px solid rgba(21,58,51,.06); border-radius: 50%; }
+.warehouse-card-top { display: flex; align-items: center; justify-content: space-between; }
+.warehouse-card-top span { color: #a1aaa6; font-size: 9px; font-weight: 700; }
+.warehouse-card-top i { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 5px rgba(0,0,0,.04); }
+.warehouse-card.seoul .warehouse-card-top i { background: #e09b3d; }
+.warehouse-card.incheon .warehouse-card-top i { background: #3d8c7b; }
+.warehouse-card.busan .warehouse-card-top i { background: #6975a5; }
+.warehouse-card > p { margin: 22px 0 4px; color: #a0a8a5; font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .08em; }
+.warehouse-card h2 { margin: 0; color: #34443e; font-size: 15px; }
+.warehouse-card > strong { position: relative; z-index: 1; display: block; margin-top: 13px; color: var(--green); font-size: 25px; font-weight: 600; }
+.warehouse-card > strong small { color: #8f9995; font-size: 9px; font-weight: 500; }
+
+.inventory-table-card { min-width: 0; overflow: hidden; border: 1px solid #dedfd9; border-radius: 11px; background: rgba(255,255,255,.62); box-shadow: 0 8px 28px rgba(36,54,48,.045); }
+.inventory-table-card table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 11px; text-align: left; }
+.inventory-table-card th { height: 44px; padding: 0 18px; color: #89938f; background: #f5f5f0; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.inventory-table-card td { height: 73px; padding: 11px 18px; border-top: 1px solid #e7e8e3; color: #5e6b66; white-space: nowrap; }
+.inventory-table-card tbody tr:first-child td { border-top: 0; }
+.inventory-table-card td > strong { display: block; color: #293832; font-size: 11px; }
+.inventory-table-card td > small { display: block; margin-top: 4px; color: #9ba39f; font-size: 9px; }
+.warehouse-quantity { border-left: 1px solid #f0f0eb; }
+.warehouse-quantity strong { font-size: 12px !important; }
+.warehouse-quantity.seoul strong { color: #9a6721 !important; }
+.warehouse-quantity.incheon strong { color: #287061 !important; }
+.warehouse-quantity.busan strong { color: #59658f !important; }
+.total-quantity { border-left: 1px solid #dedfd9; background: rgba(245,245,240,.52); }
+.total-quantity > strong { font-size: 13px !important; }
+.stock-state { display: inline-block; margin-top: 5px; padding: 3px 6px; border-radius: 8px; font-size: 8px; }
+.stock-state.normal { color: #2e7445; background: #e7f4e9; }
+.stock-state.low { color: #a54b31; background: #fbe9e3; }
+
+@media (max-width: 760px) {
+  .inventory-content { padding: 40px 18px 60px; }
+  .inventory-heading { align-items: flex-start; flex-direction: column; }
+  .inventory-total { width: 100%; text-align: left; }
+  .warehouse-grid { grid-template-columns: 1fr; }
+  .warehouse-card { min-height: 150px; }
 }

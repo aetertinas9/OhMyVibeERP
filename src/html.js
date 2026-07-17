@@ -108,6 +108,7 @@ const navigation = ({ active }) => `
     <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
     <a class="${active === "items" ? "active" : ""}" href="/items"><span aria-hidden="true">◇</span> 품목</a>
     <p class="nav-section">업무 관리</p>
+    <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
   </nav>`;
@@ -406,16 +407,28 @@ export function itemPage({
                 ${fieldError("salesPrice", fieldErrors)}
               </label>
             </div>
-            <div class="form-row two-columns">
-              <label>기초 재고
-                <input name="openingStock" type="number" value="${escapeHtml(values.openingStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("openingStock", fieldErrors)}>
-                ${fieldError("openingStock", fieldErrors)}
-              </label>
-              <label>안전 재고
-                <input name="safetyStock" type="number" value="${escapeHtml(values.safetyStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("safetyStock", fieldErrors)}>
-                ${fieldError("safetyStock", fieldErrors)}
-              </label>
-            </div>
+            <fieldset class="warehouse-stock-fields">
+              <legend>창고별 기초 재고</legend>
+              <p>서울·인천·부산 창고의 현재 수량을 각각 입력하세요.</p>
+              <div class="form-row three-columns">
+                <label><span class="warehouse-label"><i class="seoul"></i>서울 창고</span>
+                  <input name="seoulStock" type="number" value="${escapeHtml(values.seoulStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("seoulStock", fieldErrors)}>
+                  ${fieldError("seoulStock", fieldErrors)}
+                </label>
+                <label><span class="warehouse-label"><i class="incheon"></i>인천 창고</span>
+                  <input name="incheonStock" type="number" value="${escapeHtml(values.incheonStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("incheonStock", fieldErrors)}>
+                  ${fieldError("incheonStock", fieldErrors)}
+                </label>
+                <label><span class="warehouse-label"><i class="busan"></i>부산 창고</span>
+                  <input name="busanStock" type="number" value="${escapeHtml(values.busanStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("busanStock", fieldErrors)}>
+                  ${fieldError("busanStock", fieldErrors)}
+                </label>
+              </div>
+            </fieldset>
+            <label>안전 재고
+              <input name="safetyStock" type="number" value="${escapeHtml(values.safetyStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("safetyStock", fieldErrors)}>
+              ${fieldError("safetyStock", fieldErrors)}
+            </label>
             <label>메모
               <textarea name="note" placeholder="품목 사양 등 참고할 내용을 입력하세요" maxlength="500">${escapeHtml(values.note)}</textarea>
             </label>
@@ -433,6 +446,62 @@ export function itemPage({
           </div>
         </section>
       </div>
+    </section>`,
+  });
+}
+
+export function inventoryPage({ user, csrfToken, items, warehouses }) {
+  const warehouseTotals = Object.fromEntries(warehouses.map(({ id }) => [
+    id,
+    Math.round(items.reduce((total, item) => total + Number(item.stockByWarehouse[id] || 0), 0) * 100) / 100,
+  ]));
+  const grandTotal = Math.round(Object.values(warehouseTotals).reduce((total, quantity) => total + quantity, 0) * 100) / 100;
+  const warehouseCards = warehouses.map((warehouse, index) => `
+    <article class="warehouse-card ${escapeHtml(warehouse.id)}">
+      <div class="warehouse-card-top"><span>0${index + 1}</span><i></i></div>
+      <p>${escapeHtml(warehouse.code)}</p>
+      <h2>${escapeHtml(warehouse.name)}</h2>
+      <strong>${escapeHtml(Number(warehouseTotals[warehouse.id]).toLocaleString("ko-KR", { maximumFractionDigits: 2 }))}<small> 총 수량</small></strong>
+    </article>`).join("");
+  const rows = items.length
+    ? items.map((item) => {
+      const total = Number(item.openingStock || 0);
+      const isLow = Number(item.safetyStock || 0) > 0 && total <= Number(item.safetyStock);
+      return `<tr>
+        <td><strong class="record-code">${escapeHtml(item.code)}</strong></td>
+        <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "분류 미등록")} · ${escapeHtml(item.unit)}</small></td>
+        ${warehouses.map((warehouse) => `<td class="warehouse-quantity ${escapeHtml(warehouse.id)}"><strong>${escapeHtml(formatQuantity(item.stockByWarehouse[warehouse.id], item.unit))}</strong><small>${escapeHtml(warehouse.location)}</small></td>`).join("")}
+        <td class="total-quantity"><strong>${escapeHtml(formatQuantity(total, item.unit))}</strong><span class="stock-state ${isLow ? "low" : "normal"}">${isLow ? "안전재고 이하" : "정상"}</span></td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="6"><div class="empty-state"><span aria-hidden="true">◇</span><strong>재고를 확인할 품목이 없습니다.</strong><p>품목 관리에서 창고별 기초 재고를 등록해 주세요.</p></div></td></tr>`;
+
+  return workspacePage({
+    title: "재고 현황",
+    active: "inventory",
+    user,
+    csrfToken,
+    content: `<section class="inventory-content">
+      <header class="inventory-heading">
+        <div>
+          <p class="form-kicker">WAREHOUSE INVENTORY</p>
+          <h1>창고별 재고 현황</h1>
+          <p>품목별로 서울·인천·부산 창고에 보관된 수량을 확인합니다.</p>
+        </div>
+        <div class="inventory-total"><span>전체 재고 수량</span><strong>${escapeHtml(grandTotal.toLocaleString("ko-KR", { maximumFractionDigits: 2 }))}</strong></div>
+      </header>
+
+      <div class="warehouse-grid">${warehouseCards}</div>
+
+      <section class="inventory-table-card" aria-labelledby="inventory-list-title">
+        <div class="list-heading"><div><p>STOCK BY ITEM</p><h2 id="inventory-list-title">품목별 창고 재고</h2></div><strong>${items.length}<small>개 품목</small></strong></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>품목 코드</th><th>품목명</th>${warehouses.map(({ name }) => `<th>${escapeHtml(name)}</th>`).join("")}<th>전체</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </section>
     </section>`,
   });
 }

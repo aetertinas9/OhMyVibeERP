@@ -13,11 +13,12 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
-import { appPage, itemPage, loginPage, partnerPage } from "./html.js";
+import { appPage, inventoryPage, itemPage, loginPage, partnerPage } from "./html.js";
 import {
   createFileMasterDataRepository,
   DuplicateRecordError,
   InputValidationError,
+  WAREHOUSES,
 } from "./master-data.js";
 
 const publicDirectory = fileURLToPath(new URL("../public/", import.meta.url));
@@ -325,7 +326,7 @@ export async function createRequestHandler({
         return;
       }
       const values = Object.fromEntries([
-        "code", "name", "category", "unit", "purchasePrice", "salesPrice", "openingStock", "safetyStock", "taxType", "note",
+        "code", "name", "category", "unit", "purchasePrice", "salesPrice", "seoulStock", "incheonStock", "busanStock", "safetyStock", "taxType", "note",
       ].map((field) => [field, form.get(field) ?? ""]));
       try {
         await masterData.createItem(values, session.user.id);
@@ -345,6 +346,24 @@ export async function createRequestHandler({
           "Content-Type": "text/html; charset=utf-8",
         }, secure);
       }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/inventory") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const items = await masterData.listItems();
+      send(response, 200, inventoryPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        items,
+        warehouses: WAREHOUSES,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
       return;
     }
 
@@ -371,7 +390,7 @@ export async function createRequestHandler({
       return;
     }
 
-    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items"].includes(url.pathname) || Boolean(partnerMatch);
+    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items", "/inventory"].includes(url.pathname) || Boolean(partnerMatch);
     send(
       response,
       knownPath ? 405 : 404,
