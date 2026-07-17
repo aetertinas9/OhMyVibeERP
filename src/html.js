@@ -116,7 +116,7 @@ const navigation = ({ active }) => `
     <a class="${active === "monthly-report" ? "active" : ""}" href="/reports/monthly"><span aria-hidden="true">₩</span> 월간 매입·판매</a>
     <p class="nav-section">인사 · 급여</p>
     <a class="${active === "employees" ? "active" : ""}" href="/employees"><span aria-hidden="true">♙</span> 직원 명부</a>
-    <a href="#" aria-disabled="true"><span aria-hidden="true">₩</span> 급여 관리 <em>준비 중</em></a>
+    <a class="${active === "payroll" ? "active" : ""}" href="/payroll"><span aria-hidden="true">₩</span> 급여 관리</a>
   </nav>`;
 
 function workspacePage({ title, active, user, csrfToken, content }) {
@@ -733,6 +733,88 @@ export function employeePage({
         ${employees.length ? `<div class="table-scroll"><table><thead><tr><th>직원번호</th><th>이름·이메일</th><th>부서·직급</th><th>근무지·고용</th><th>입사일·상태</th><th>월 기본급</th><th>공제 기준</th></tr></thead><tbody>${employeeRows}</tbody></table></div>` : `<div class="report-empty"><span aria-hidden="true">♙</span><strong>검색 조건에 맞는 직원이 없습니다.</strong><p>검색어나 부서 조건을 바꿔 주세요.</p></div>`}
       </section>
     </section>`,
+  });
+}
+
+export function payrollPage({
+  user,
+  csrfToken,
+  employees,
+  runs,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+}) {
+  const activeEmployees = employees.filter(({ employmentStatus }) => employmentStatus === "active");
+  const eligibleEmployees = activeEmployees.filter(({ hireDate }) => !values.payDate || hireDate <= values.payDate);
+  const runCards = runs.map((run, runIndex) => {
+    const lineRows = run.lines.map((line) => `<tr data-payroll-line>
+      <td><strong class="record-code">${escapeHtml(line.employeeNumber)}</strong></td>
+      <td><strong>${escapeHtml(line.name)}</strong><small>${escapeHtml(line.department)} · ${escapeHtml(line.position)}</small></td>
+      <td class="number-cell">${escapeHtml(formatMoney(line.baseSalary))}</td>
+      <td class="number-cell">${escapeHtml(formatMoney(line.mealAllowance + line.otherAllowance))}</td>
+      <td class="number-cell"><strong>${escapeHtml(formatMoney(line.grossPay))}</strong></td>
+      <td class="number-cell deduction-cell">-${escapeHtml(formatMoney(line.fixedDeduction))}</td>
+      <td class="number-cell net-pay-cell"><strong>${escapeHtml(formatMoney(line.netPay))}</strong></td>
+      <td><a class="statement-link" href="/payroll/${escapeHtml(run.id)}/statements?employee=${escapeHtml(line.employeeId)}" target="_blank" rel="noopener">개인 명세</a></td>
+    </tr>`).join("");
+    const [year, month] = run.payPeriod.split("-").map(Number);
+    return `<article class="payroll-run-card">
+      <header><div><span class="order-number">${escapeHtml(run.number)}</span><h2>${year}년 ${month}월 급여대장</h2><p>급여일 ${escapeHtml(formatDate(run.payDate))} · ${run.employeeCount.toLocaleString("ko-KR")}명</p></div><div class="payroll-run-actions"><span class="order-status received">확정</span><a href="/payroll/${escapeHtml(run.id)}/statements" target="_blank" rel="noopener">${run.employeeCount.toLocaleString("ko-KR")}명 명세서 전체 출력</a></div></header>
+      <div class="payroll-totals"><div><span>지급 합계</span><strong>${escapeHtml(formatMoney(run.totalGrossPay))}</strong></div><div><span>공제 합계</span><strong>${escapeHtml(formatMoney(run.totalDeduction))}</strong></div><div><span>실지급 합계</span><strong>${escapeHtml(formatMoney(run.totalNetPay))}</strong></div></div>
+      <details class="payroll-lines"${runIndex === 0 ? " open" : ""}><summary>직원별 급여 내역 ${run.employeeCount.toLocaleString("ko-KR")}건 보기</summary><div class="table-scroll"><table><thead><tr><th>직원번호</th><th>직원</th><th>기본급</th><th>수당</th><th>지급 합계</th><th>등록 공제</th><th>실지급액</th><th>출력</th></tr></thead><tbody>${lineRows}</tbody></table></div></details>
+    </article>`;
+  }).join("");
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">급여대장을 확정하고 직원별 급여명세를 생성했습니다.</div>`
+      : "";
+
+  return workspacePage({
+    title: "급여 관리",
+    active: "payroll",
+    user,
+    csrfToken,
+    content: `<section class="payroll-content">
+      <header class="payroll-heading"><div><p class="form-kicker">PAYROLL</p><h1>급여 관리</h1><p>월급날 재직자의 급여대장을 확정하고 개인별 명세서를 출력합니다.</p></div><div class="payroll-headcount"><span>현재 재직자</span><strong>${activeEmployees.length.toLocaleString("ko-KR")}<small>명</small></strong></div></header>
+      ${notice}
+      <aside class="payroll-caution"><span aria-hidden="true">!</span><p><strong>법정 세금·보험료 자동 계산 기능이 아닙니다.</strong> 직원 명부에 등록한 월 고정 공제 총액을 사용합니다. 실제 지급 전 세무·노무 담당자가 반드시 확인하세요.</p></aside>
+
+      <section class="payroll-create-card">
+        <div><p>NEW PAYROLL RUN</p><h2>월 급여 확정</h2><span>급여일 기준 입사 완료·재직 상태인 직원의 명세를 한 번에 생성합니다.</span></div>
+        <form action="/payroll/runs" method="post" class="payroll-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <label>급여 귀속월 <b>*</b><input name="payPeriod" type="month" value="${escapeHtml(values.payPeriod)}" required${inputState("payPeriod", fieldErrors)}>${fieldError("payPeriod", fieldErrors)}</label>
+          <label>급여일 <b>*</b><input name="payDate" type="date" value="${escapeHtml(values.payDate)}" required${inputState("payDate", fieldErrors)}>${fieldError("payDate", fieldErrors)}</label>
+          <label class="payroll-note">메모<input name="note" value="${escapeHtml(values.note)}" placeholder="예: 7월 정기 급여" maxlength="500"></label>
+          <div class="payroll-target"><span>예상 대상</span><strong>${eligibleEmployees.length.toLocaleString("ko-KR")}명</strong></div>
+          <button type="submit">급여 확정 <span aria-hidden="true">→</span></button>
+        </form>
+      </section>
+
+      <section class="payroll-history"><div class="orders-title"><p>CONFIRMED PAYROLL</p><h2>급여대장·명세서</h2></div>${runCards || `<div class="order-empty"><span aria-hidden="true">₩</span><h2>확정된 급여대장이 없습니다.</h2><p>급여 귀속월과 급여일을 확인하고 첫 급여를 확정하세요.</p></div>`}</section>
+    </section>`,
+  });
+}
+
+export function payrollStatementsPage({ run, lines }) {
+  const [year, month] = run.payPeriod.split("-").map(Number);
+  const slips = lines.map((line) => `<article class="payroll-slip" data-payroll-statement>
+    <header><div><p>OhMyVibeERP</p><h1>${year}년 ${month}월 급여명세서</h1></div><span>${escapeHtml(run.number)}</span></header>
+    <dl class="slip-employee"><div><dt>직원번호</dt><dd>${escapeHtml(line.employeeNumber)}</dd></div><div><dt>성명</dt><dd>${escapeHtml(line.name)}</dd></div><div><dt>부서·직급</dt><dd>${escapeHtml(line.department)} · ${escapeHtml(line.position)}</dd></div><div><dt>급여일</dt><dd>${escapeHtml(formatDate(run.payDate))}</dd></div></dl>
+    <div class="slip-columns">
+      <section><h2>지급 내역</h2><dl><div><dt>기본급</dt><dd>${escapeHtml(formatMoney(line.baseSalary))}</dd></div><div><dt>식대</dt><dd>${escapeHtml(formatMoney(line.mealAllowance))}</dd></div><div><dt>기타 수당</dt><dd>${escapeHtml(formatMoney(line.otherAllowance))}</dd></div><div class="subtotal"><dt>지급 합계</dt><dd>${escapeHtml(formatMoney(line.grossPay))}</dd></div></dl></section>
+      <section><h2>공제 내역</h2><dl><div><dt>등록 공제액</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div><div class="slip-spacer"><dt>공제 기준</dt><dd>직원 명부 등록액</dd></div><div class="subtotal"><dt>공제 합계</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div></dl></section>
+    </div>
+    <div class="slip-net"><span>실지급액</span><strong>${escapeHtml(formatMoney(line.netPay))}</strong></div>
+    <footer><p>본 명세서는 OhMyVibeERP 등록 급여 기준으로 생성되었습니다. 법정 공제 및 실제 지급 전 담당자 확인이 필요합니다.</p><span>확정일 ${escapeHtml(formatKoreanDateTime(run.confirmedAt))}</span></footer>
+  </article>`).join("");
+  return document({
+    title: `${year}년 ${month}월 급여명세서 | OhMyVibeERP`,
+    pageClass: "payroll-print-page",
+    body: `<div class="print-toolbar"><a href="/payroll">← 급여 관리로</a><p><strong>${lines.length.toLocaleString("ko-KR")}명 명세서</strong> · 브라우저 인쇄(Ctrl/⌘ + P)로 인쇄하거나 PDF로 저장하세요.</p></div><main class="payroll-slip-stack">${slips}</main>`,
   });
 }
 

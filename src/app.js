@@ -21,6 +21,8 @@ import {
   loginPage,
   monthlyTradeReportPage,
   partnerPage,
+  payrollPage,
+  payrollStatementsPage,
   productionPage,
   purchaseOrdersPage,
   salesOrdersPage,
@@ -474,6 +476,89 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/payroll") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const [employees, runs] = await Promise.all([
+        masterData.listEmployees(),
+        masterData.listPayrollRuns(),
+      ]);
+      const payPeriod = today().slice(0, 7);
+      send(response, 200, payrollPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        employees,
+        runs,
+        values: { payPeriod, payDate: `${payPeriod}-25` },
+        created: url.searchParams.get("created") === "1",
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/payroll/runs") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const values = Object.fromEntries(["payPeriod", "payDate", "note"].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createPayrollRun(values, session.user.id);
+        redirect(response, "/payroll?created=1", [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof InputValidationError)
+          && !(error instanceof DuplicateRecordError)
+          && !(error instanceof BusinessRuleError)
+        ) throw error;
+        const [employees, runs] = await Promise.all([
+          masterData.listEmployees(),
+          masterData.listPayrollRuns(),
+        ]);
+        send(response, error.statusCode, payrollPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          employees,
+          runs,
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    const payrollStatementMatch = url.pathname.match(/^\/payroll\/([^/]+)\/statements$/);
+    if (request.method === "GET" && payrollStatementMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const run = await masterData.getPayrollRun(payrollStatementMatch[1]);
+      const requestedEmployeeId = String(url.searchParams.get("employee") ?? "").slice(0, 120);
+      const lines = requestedEmployeeId
+        ? run.lines.filter(({ employeeId }) => employeeId === requestedEmployeeId)
+        : run.lines;
+      if (requestedEmployeeId && !lines.length) throw new RecordNotFoundError("급여명세 대상 직원을 찾을 수 없습니다.");
+      send(response, 200, payrollStatementsPage({ run, lines }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/purchase-orders") {
       if (!session) {
         redirect(response, "/login", [], secure);
@@ -850,8 +935,9 @@ export async function createRequestHandler({
 
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
-      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/employees",
-    ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch);
+      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/employees", "/payroll",
+      "/payroll/runs",
+    ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
     send(
       response,
       knownPath ? 405 : 404,
