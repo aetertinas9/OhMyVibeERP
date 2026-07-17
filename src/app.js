@@ -18,6 +18,7 @@ import {
   inventoryPage,
   itemPage,
   loginPage,
+  monthlyTradeReportPage,
   partnerPage,
   productionPage,
   purchaseOrdersPage,
@@ -650,6 +651,32 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/reports/monthly") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const month = url.searchParams.get("month") ?? today().slice(0, 7);
+      const [summary, purchasePartners, salesPartners, items] = await Promise.all([
+        masterData.monthlyTradeSummary(month),
+        masterData.listPartners("purchases"),
+        masterData.listPartners("sales"),
+        masterData.listItems(),
+      ]);
+      send(response, 200, monthlyTradeReportPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        warehouses: WAREHOUSES,
+        partners: [...purchasePartners, ...salesPartners],
+        items,
+        summary,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/production/boms") {
       if (!session) {
         redirect(response, "/login", [], secure);
@@ -755,7 +782,7 @@ export async function createRequestHandler({
 
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
-      "/production", "/production/boms", "/production/orders",
+      "/production", "/production/boms", "/production/orders", "/reports/monthly",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch);
     send(
       response,

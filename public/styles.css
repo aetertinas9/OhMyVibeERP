@@ -312,9 +312,79 @@ button, input { font: inherit; }
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow-y: auto;
   padding: 33px 22px 22px;
   color: #fff;
   background: var(--green);
+}
+
+/* Monthly trade report */
+.report-content { width: min(100%, 1400px); margin: 0 auto; padding: 54px 48px 80px; }
+.report-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 25px; }
+.report-heading .form-kicker { margin-bottom: 9px; color: #2f7880; }
+.report-heading h1 { margin: 0; color: var(--ink); font-size: clamp(28px,3vw,40px); letter-spacing: -.045em; }
+.report-heading > div > p:last-child { margin: 9px 0 0; color: #74817c; font-size: 13px; }
+.month-filter { display: flex; align-items: end; gap: 8px; padding: 10px; border: 1px solid #d8dcd6; border-radius: 9px; background: rgba(255,255,255,.6); }
+.month-filter label { align-self: center; margin: 0 4px; color: #6f7e78; font-size: 9px; font-weight: 700; }
+.month-filter input { width: 145px; height: 38px; padding: 0 10px; border: 1px solid #d3d8d2; border-radius: 6px; color: var(--ink); background: #fff; font-size: 11px; }
+.month-filter button { height: 38px; padding: 0 17px; border: 0; border-radius: 6px; color: #fff; background: var(--green); cursor: pointer; font-size: 10px; font-weight: 700; }
+.report-basis { display: flex; align-items: center; gap: 10px; margin-bottom: 17px; padding: 12px 15px; border: 1px solid #cbdadd; border-radius: 8px; color: #516e72; background: #eef6f6; }
+.report-basis > span { display: grid; place-items: center; flex: 0 0 auto; width: 21px; height: 21px; border-radius: 50%; color: #fff; background: #4d858b; font-family: ui-serif,serif; font-size: 11px; }
+.report-basis p { margin: 0; font-size: 10px; line-height: 1.6; }
+.report-basis strong { margin-right: 5px; color: #315f64; }
+.trade-summary { display: grid; grid-template-columns: repeat(3,1fr); gap: 15px; margin-bottom: 28px; }
+.trade-summary article { position: relative; min-height: 175px; overflow: hidden; padding: 24px; border: 1px solid #d9ddd7; border-radius: 11px; background: rgba(255,255,255,.7); box-shadow: 0 8px 25px rgba(36,54,48,.045); }
+.trade-summary article::after { content: ""; position: absolute; right: -42px; bottom: -67px; width: 150px; height: 150px; border: 1px solid rgba(37,70,62,.07); border-radius: 50%; }
+.trade-summary article > span { color: #7f8b86; font-size: 10px; font-weight: 700; }
+.trade-summary article > strong { position: relative; z-index: 1; display: block; margin-top: 25px; color: var(--ink); font-size: clamp(25px,2.5vw,35px); letter-spacing: -.035em; }
+.trade-summary article > p { position: relative; z-index: 1; margin: 9px 0 0; color: #939d99; font-size: 9px; }
+.trade-summary .spent > strong { color: #a05d48; }
+.trade-summary .earned > strong { color: #287362; }
+.trade-summary .difference { color: #fff; background: var(--green); border-color: var(--green); }
+.trade-summary .difference::after { border-color: rgba(255,255,255,.09); }
+.trade-summary .difference > span, .trade-summary .difference > p { color: #a9c0ba; }
+.trade-summary .difference > strong { color: var(--orange); }
+.trade-summary .difference.negative > strong { color: #efad98; }
+.trade-history { overflow: hidden; border: 1px solid #d9ddd7; border-radius: 11px; background: rgba(255,255,255,.68); box-shadow: 0 8px 25px rgba(36,54,48,.04); }
+.trade-history-heading { display: flex; align-items: center; justify-content: space-between; min-height: 82px; padding: 20px 24px; border-bottom: 1px solid #e1e3dd; }
+.trade-history-heading p { margin: 0 0 5px; color: #2f7880; font-size: 8px; font-weight: 700; letter-spacing: .16em; }
+.trade-history-heading h2 { margin: 0; color: var(--ink); font-size: 17px; }
+.trade-history-heading > span { color: #8a9590; font-size: 9px; }
+.trade-history-heading > span strong { margin: 0 2px; color: var(--green); font-size: 16px; }
+.trade-history table { width: 100%; min-width: 960px; border-collapse: collapse; }
+.trade-history th { height: 41px; padding: 0 14px; color: #89938f; background: #f5f5f0; font-size: 8px; text-align: left; white-space: nowrap; }
+.trade-history td { padding: 14px; border-top: 1px solid #e8e9e4; color: #5d6a65; font-size: 10px; vertical-align: top; }
+.trade-history td > strong { display: block; color: #34443e; font-size: 10px; white-space: nowrap; }
+.trade-history td > small { display: block; margin-top: 4px; color: #9aa39f; font-size: 8px; white-space: nowrap; }
+.trade-type { display: inline-block; padding: 5px 8px; border-radius: 10px; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.trade-type.purchase { color: #8c4e3d; background: #fbe9e3; }
+.trade-type.sale { color: #286d5d; background: #e4f2ec; }
+.trade-lines { min-width: 280px; }
+.trade-lines > div { display: grid; grid-template-columns: minmax(90px,1fr) 1fr auto; align-items: center; gap: 10px; margin-top: 6px; }
+.trade-lines > div:first-child { margin-top: 0; }
+.trade-lines strong { color: #34443e; font-size: 9px; }
+.trade-lines span { color: #8c9792; font-size: 8px; white-space: nowrap; }
+.trade-lines em { color: #65736d; font-size: 9px; font-style: normal; white-space: nowrap; }
+.trade-amount { padding-top: 18px !important; font-size: 12px !important; font-weight: 700; white-space: nowrap; }
+.trade-amount.purchase { color: #a05d48; }
+.trade-amount.sale { color: #287362; }
+.report-empty { display: grid; place-items: center; min-height: 260px; color: #8b9691; text-align: center; }
+.report-empty > span { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 12px; border: 1px dashed #bac8c3; border-radius: 50%; color: #2f7880; font-size: 19px; }
+.report-empty strong { color: #586762; font-size: 12px; }
+.report-empty p { margin: 7px 0 0; font-size: 9px; }
+
+@media (max-width: 900px) {
+  .trade-summary { grid-template-columns: 1fr; }
+  .trade-summary article { min-height: 145px; }
+  .trade-summary article > strong { margin-top: 17px; }
+}
+
+@media (max-width: 760px) {
+  .report-content { padding: 40px 18px 65px; }
+  .report-heading { align-items: flex-start; flex-direction: column; }
+  .month-filter { width: 100%; }
+  .month-filter input { flex: 1; width: auto; }
+  .report-basis { align-items: flex-start; }
 }
 
 .sidebar-brand { margin: 0 10px 62px; font-size: 14px; }

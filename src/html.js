@@ -112,6 +112,8 @@ const navigation = ({ active }) => `
     <a class="${active === "purchase-orders" ? "active" : ""}" href="/purchase-orders"><span aria-hidden="true">▦</span> 발주 관리</a>
     <a class="${active === "production" ? "active" : ""}" href="/production"><span aria-hidden="true">⚙</span> 생산 관리</a>
     <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
+    <p class="nav-section">보고서</p>
+    <a class="${active === "monthly-report" ? "active" : ""}" href="/reports/monthly"><span aria-hidden="true">₩</span> 월간 매입·판매</a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
   </nav>`;
 
@@ -191,6 +193,22 @@ function formatBusinessNumber(value) {
 function formatDate(value) {
   try {
     return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium" }).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+function formatKoreanDateTime(value) {
+  try {
+    return new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(value));
   } catch {
     return "—";
   }
@@ -879,6 +897,69 @@ export function productionPage({
 
       <section class="orders-section production-section"><div class="orders-title"><p>PRODUCT STRUCTURE</p><h2>완제품별 부품 구성</h2></div>${billCards}</section>
       <section class="orders-section production-section"><div class="orders-title"><p>PRODUCTION HISTORY</p><h2>생산·재고 반영 이력</h2></div>${productionCards}</section>
+    </section>`,
+  });
+}
+
+export function monthlyTradeReportPage({
+  user,
+  csrfToken,
+  warehouses,
+  partners,
+  items,
+  summary,
+}) {
+  const partnerMap = new Map(partners.map((partner) => [partner.id, partner]));
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const [year, month] = summary.month.split("-").map(Number);
+  const monthLabel = `${year}년 ${month}월`;
+  const isPositive = summary.differenceAmount >= 0;
+  const differenceMessage = isPositive
+    ? `판매액이 매입액보다 ${formatMoney(summary.differenceAmount)} 많습니다.`
+    : `매입액이 판매액보다 ${formatMoney(Math.abs(summary.differenceAmount))} 많습니다.`;
+
+  const transactionRows = summary.transactions.map((transaction) => {
+    const isPurchase = transaction.type === "purchase";
+    const partner = partnerMap.get(transaction.partnerId);
+    const warehouse = warehouseMap.get(transaction.warehouseId);
+    const lineDetails = transaction.lines.map((line) => {
+      const item = itemMap.get(line.itemId);
+      return `<div><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><span>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))} × ${escapeHtml(formatMoney(line.unitPrice))}</span><em>${escapeHtml(formatMoney(line.amount))}</em></div>`;
+    }).join("");
+    return `<tr>
+      <td><span class="trade-type ${isPurchase ? "purchase" : "sale"}">${isPurchase ? "구매 입고" : "판매 출고"}</span></td>
+      <td><strong>${escapeHtml(formatKoreanDateTime(transaction.occurredAt))}</strong><small>${escapeHtml(transaction.documentNumber)}</small></td>
+      <td><strong>${escapeHtml(partner?.name ?? "알 수 없는 거래처")}</strong><small>${escapeHtml(partner?.code ?? transaction.partnerId)}</small></td>
+      <td>${escapeHtml(warehouse?.name ?? transaction.warehouseId)}</td>
+      <td class="trade-lines">${lineDetails}</td>
+      <td class="number-cell trade-amount ${isPurchase ? "purchase" : "sale"}">${isPurchase ? "-" : "+"}${escapeHtml(formatMoney(transaction.amount))}</td>
+    </tr>`;
+  }).join("");
+
+  return workspacePage({
+    title: "월간 매입·판매",
+    active: "monthly-report",
+    user,
+    csrfToken,
+    content: `<section class="report-content">
+      <header class="report-heading">
+        <div><p class="form-kicker">MONTHLY TRADE REPORT</p><h1>월간 매입·판매</h1><p>실제로 입고하고 출고한 수량을 돈 기준으로 정리합니다.</p></div>
+        <form action="/reports/monthly" method="get" class="month-filter"><label for="report-month">조회 월</label><input id="report-month" name="month" type="month" value="${escapeHtml(summary.month)}" required><button type="submit">조회</button></form>
+      </header>
+
+      <aside class="report-basis"><span aria-hidden="true">i</span><p><strong>입고·출고 금액 기준입니다.</strong> 실제 지급·수금이나 부가세, 급여, 운임 등은 반영되지 않아 회계상 순이익과는 다릅니다.</p></aside>
+
+      <section class="trade-summary" aria-label="${escapeHtml(monthLabel)} 금액 요약">
+        <article class="spent"><span>이번 달 쓴 금액</span><strong>${escapeHtml(formatMoney(summary.purchaseAmount))}</strong><p>구매 입고 ${summary.purchaseCount.toLocaleString("ko-KR")}건</p></article>
+        <article class="earned"><span>이번 달 번 금액</span><strong>${escapeHtml(formatMoney(summary.salesAmount))}</strong><p>판매 출고 ${summary.salesCount.toLocaleString("ko-KR")}건</p></article>
+        <article class="difference ${isPositive ? "positive" : "negative"}"><span>매입·판매 차액</span><strong>${isPositive ? "+" : "-"}${escapeHtml(formatMoney(Math.abs(summary.differenceAmount)))}</strong><p>${escapeHtml(differenceMessage)}</p></article>
+      </section>
+
+      <section class="trade-history" aria-labelledby="trade-history-title">
+        <div class="trade-history-heading"><div><p>TRANSACTION BASIS</p><h2 id="trade-history-title">${escapeHtml(monthLabel)} 거래 근거</h2></div><span>총 <strong>${summary.transactions.length.toLocaleString("ko-KR")}</strong>건</span></div>
+        ${summary.transactions.length ? `<div class="table-scroll"><table><thead><tr><th>구분</th><th>처리 일시·문서</th><th>거래처</th><th>창고</th><th>품목·산식</th><th>금액</th></tr></thead><tbody>${transactionRows}</tbody></table></div>` : `<div class="report-empty"><span aria-hidden="true">₩</span><strong>이 달에 반영된 매입·판매가 없습니다.</strong><p>발주 입고 또는 판매 출고를 처리하면 금액이 여기에 표시됩니다.</p></div>`}
+      </section>
     </section>`,
   });
 }
