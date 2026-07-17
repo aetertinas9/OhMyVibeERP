@@ -3,7 +3,9 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import {
+  createDemoCredentialStore,
   createCredentialStore,
+  DEMO_ACCOUNTS,
   LOGIN_CSRF_COOKIE,
   LoginRateLimiter,
   normalizeUsername,
@@ -13,6 +15,7 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
+import { canAccess, departmentOf, permissionForRequest, PERMISSIONS } from "./access-control.js";
 import {
   appPage,
   employeePage,
@@ -133,10 +136,17 @@ export async function createRequestHandler({
 } = {}) {
   const usesDemoAccount = !env.ERP_ADMIN_USERNAME && !env.ERP_ADMIN_PASSWORD;
   const secure = env.NODE_ENV === "production";
-  const credentials = credentialStore ?? await createCredentialStore({
-    username: env.ERP_ADMIN_USERNAME ?? "admin",
-    password: env.ERP_ADMIN_PASSWORD ?? "ChangeMe123!",
-    displayName: env.ERP_ADMIN_NAME ?? "관리자",
+  const credentials = credentialStore ?? (usesDemoAccount
+    ? await createDemoCredentialStore()
+    : await createCredentialStore({
+      username: env.ERP_ADMIN_USERNAME,
+      password: env.ERP_ADMIN_PASSWORD,
+      displayName: env.ERP_ADMIN_NAME ?? "관리자",
+    }));
+  const loginView = (options = {}) => ({
+    showDemoAccount: usesDemoAccount,
+    demoAccounts: usesDemoAccount ? DEMO_ACCOUNTS : [],
+    ...options,
   });
   const masterData = masterDataRepository ?? createFileMasterDataRepository({
     filePath: env.ERP_DATA_FILE,
@@ -175,6 +185,12 @@ export async function createRequestHandler({
     const cookies = parseCookies(request.headers.cookie);
     const sessionToken = cookies[SESSION_COOKIE];
     const session = sessionStore.get(sessionToken);
+    const requiredPermission = permissionForRequest(request.method, url.pathname);
+
+    if (session && requiredPermission && !canAccess(session.user, requiredPermission)) {
+      send(response, 403, "부서 권한이 없는 업무입니다.", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/") {
       redirect(response, session ? "/app" : "/login", [], secure);
@@ -186,7 +202,7 @@ export async function createRequestHandler({
         redirect(response, "/app", [], secure);
         return;
       }
-      renderLogin(response, { showDemoAccount: usesDemoAccount }, { secure });
+      renderLogin(response, loginView(), { secure });
       return;
     }
 
@@ -209,7 +225,7 @@ export async function createRequestHandler({
       if (!safeTokenEqual(csrfToken, cookies[LOGIN_CSRF_COOKIE])) {
         renderLogin(
           response,
-          { error: "요청이 만료되었습니다. 다시 시도해 주세요.", showDemoAccount: usesDemoAccount, username },
+          loginView({ error: "요청이 만료되었습니다. 다시 시도해 주세요.", username }),
           { statusCode: 403, secure },
         );
         return;
@@ -218,7 +234,7 @@ export async function createRequestHandler({
       if (username.length > 80 || password.length > 200 || !username || !password) {
         renderLogin(
           response,
-          { error: "아이디와 비밀번호를 확인해 주세요.", showDemoAccount: usesDemoAccount, username: username.slice(0, 80) },
+          loginView({ error: "아이디와 비밀번호를 확인해 주세요.", username: username.slice(0, 80) }),
           { statusCode: 400, secure },
         );
         return;
@@ -229,7 +245,7 @@ export async function createRequestHandler({
       if (limit.blocked) {
         renderLogin(
           response,
-          { error: "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", showDemoAccount: usesDemoAccount, username },
+          loginView({ error: "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.", username }),
           { statusCode: 429, secure, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
         );
         return;
@@ -240,13 +256,12 @@ export async function createRequestHandler({
         const failedLimit = rateLimiter.fail(key);
         renderLogin(
           response,
-          {
+          loginView({
             error: failedLimit.blocked
               ? "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
               : "아이디 또는 비밀번호가 올바르지 않습니다.",
-            showDemoAccount: usesDemoAccount,
             username,
-          },
+          }),
           {
             statusCode: failedLimit.blocked ? 429 : 401,
             secure,
@@ -276,7 +291,9 @@ export async function createRequestHandler({
         return;
       }
       const asOfDate = today();
-      const dashboard = await masterData.executiveDashboard(asOfDate.slice(0, 7));
+      const dashboard = departmentOf(session.user) === "management"
+        ? await masterData.executiveDashboard(asOfDate.slice(0, 7))
+        : null;
       send(response, 200, appPage({
         user: session.user,
         csrfToken: session.csrfToken,

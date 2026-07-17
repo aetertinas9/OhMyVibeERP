@@ -280,6 +280,14 @@ button, input { font: inherit; }
 .demo-account p { margin: 0; line-height: 1.55; }
 .demo-account strong { color: #3f4c48; }
 .demo-account code { color: var(--green); font-family: Inter, ui-monospace, monospace; font-size: 11px; }
+.department-demo { align-items: flex-start; }
+.department-demo > div { min-width: 0; flex: 1; }
+.department-demo p { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.department-demo small { color: #7c8883; font-size: 9px; font-weight: 500; }
+.department-demo ul { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 11px 0 0; padding: 0; list-style: none; }
+.department-demo li { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 5px 7px; border: 1px solid #dfe3dc; border-radius: 5px; background: rgba(255,255,255,.55); }
+.department-demo li b { color: #6c7873; font-size: 8px; }
+.department-demo li code { overflow: hidden; font-size: 9px; text-overflow: ellipsis; }
 
 .help-text { margin: 26px 0 0; color: #86908c; font-size: 12px; text-align: center; }
 .help-text a { color: var(--green); font-weight: 600; text-underline-offset: 3px; }
@@ -419,6 +427,27 @@ button, input { font: inherit; }
 .sidebar-user small { color: #78958e; font-size: 10px; }
 
 .workspace { min-width: 0; }
+
+/* Department workspace */
+.department-home { width: min(100%, 1050px); margin: 0 auto; padding: 70px 48px 90px; }
+.department-home > header .form-kicker { margin-bottom: 10px; }
+.department-home > header h1 { margin: 0; color: var(--ink); font-size: clamp(32px, 4vw, 48px); letter-spacing: -.05em; }
+.department-home > header > p:last-child { margin: 12px 0 0; color: #71807a; font-size: 14px; }
+.department-home > aside { display: flex; align-items: center; gap: 13px; margin: 34px 0 22px; padding: 15px 17px; border: 1px solid #c9dcd5; border-radius: 9px; color: #41665c; background: #edf6f2; }
+.department-home > aside > span { display: grid; place-items: center; flex: 0 0 auto; width: 27px; height: 27px; border-radius: 50%; color: #fff; background: #2d7564; font-size: 11px; font-weight: 800; }
+.department-home > aside p { margin: 0; font-size: 10px; line-height: 1.6; }
+.department-home > aside strong { margin-right: 4px; color: #24594d; }
+.department-task-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
+.department-task-grid > a { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 14px; min-height: 92px; padding: 18px; border: 1px solid #d9ddd7; border-radius: 10px; color: inherit; background: rgba(255,255,255,.68); box-shadow: 0 7px 22px rgba(36,54,48,.035); text-decoration: none; transition: border-color .18s, transform .18s; }
+.department-task-grid > a:hover { transform: translateY(-2px); border-color: #9cbab1; }
+.department-task-grid > a > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 9px; color: #fff; background: var(--green); font-size: 16px; }
+.department-task-grid strong { display: block; color: #2c3d36; font-size: 13px; }
+.department-task-grid small { display: block; margin-top: 5px; color: #89938f; font-size: 9px; }
+.department-task-grid > a > b { color: #d6892d; font-size: 15px; }
+.restricted-action { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-top: 1px solid #d9e0dc; color: #60716a; background: #f3f7f4; }
+.restricted-action > span { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; color: #fff; background: #668078; font-size: 11px; }
+.restricted-action strong { color: #3e554d; font-size: 10px; }
+.restricted-action p { margin: 3px 0 0; font-size: 9px; line-height: 1.5; }
 
 .topbar {
   display: flex;
@@ -1007,4 +1036,11 @@ button, input { font: inherit; }
   .payroll-slip-stack { width: 100%; }
   .payroll-slip { min-height: 0; margin: 0; padding: 0; box-shadow: none; break-after: page; page-break-after: always; }
   .payroll-slip:last-child { break-after: auto; page-break-after: auto; }
+}
+
+@media (max-width: 760px) {
+  .department-demo p { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .department-demo ul { grid-template-columns: repeat(2, 1fr); }
+  .department-home { padding: 42px 18px 65px; }
+  .department-task-grid { grid-template-columns: 1fr; }
 }

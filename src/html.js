@@ -1,3 +1,5 @@
+import { canAccess, departmentLabel, PERMISSIONS } from "./access-control.js";
+
 const escapeHtml = (value = "") =>
   String(value).replace(
     /[&<>'"]/g,
@@ -27,7 +29,13 @@ const document = ({ title, body, pageClass = "" }) => `<!doctype html>
   </body>
 </html>`;
 
-export function loginPage({ csrfToken = "", error = "", username = "", showDemoAccount = true } = {}) {
+export function loginPage({
+  csrfToken = "",
+  error = "",
+  username = "",
+  showDemoAccount = true,
+  demoAccounts = [],
+} = {}) {
   const message = error
     ? `<div class="alert" role="alert"><span aria-hidden="true">!</span><p>${escapeHtml(error)}</p></div>`
     : "";
@@ -88,9 +96,9 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
               <button type="submit">로그인 <span aria-hidden="true">→</span></button>
             </form>
 
-            ${showDemoAccount ? `<aside class="demo-account" aria-label="체험 계정 안내">
+            ${showDemoAccount ? `<aside class="demo-account department-demo" aria-label="체험 계정 안내">
               <span>DEMO</span>
-              <p><strong>체험 계정</strong><br><code>admin</code> / <code>ChangeMe123!</code></p>
+              <div><p><strong>부서별 체험 계정</strong><small>비밀번호 공통 · <code>ChangeMe123!</code></small></p><ul>${demoAccounts.map((account) => `<li data-demo-account="${escapeHtml(account.username)}"><b>${escapeHtml(account.department === "management" ? "관리" : departmentLabel(account))}</b><code>${escapeHtml(account.username)}</code></li>`).join("")}</ul></div>
             </aside>` : ""}
             <p class="help-text">로그인에 문제가 있나요? <a href="mailto:help@ohmyvibeerp.example">관리자에게 문의</a></p>
           </div>
@@ -99,25 +107,39 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
   });
 }
 
-const navigation = ({ active }) => `
-  <nav aria-label="주 메뉴">
-    <p>WORKSPACE</p>
-    <a class="${active === "home" ? "active" : ""}" href="/app"><span aria-hidden="true">⌂</span> 홈</a>
-    <p class="nav-section">기준 정보</p>
-    <a class="${active === "sales" ? "active" : ""}" href="/partners/sales"><span aria-hidden="true">↗</span> 판매처</a>
-    <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
-    <a class="${active === "items" ? "active" : ""}" href="/items"><span aria-hidden="true">◇</span> 품목</a>
-    <p class="nav-section">업무 관리</p>
-    <a class="${active === "sales-orders" ? "active" : ""}" href="/sales-orders"><span aria-hidden="true">↗</span> 주문 · 출고</a>
-    <a class="${active === "purchase-orders" ? "active" : ""}" href="/purchase-orders"><span aria-hidden="true">▦</span> 발주 관리</a>
-    <a class="${active === "production" ? "active" : ""}" href="/production"><span aria-hidden="true">⚙</span> 생산 관리</a>
-    <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
-    <p class="nav-section">보고서</p>
-    <a class="${active === "monthly-report" ? "active" : ""}" href="/reports/monthly"><span aria-hidden="true">₩</span> 월간 매입·판매</a>
-    <p class="nav-section">인사 · 급여</p>
-    <a class="${active === "employees" ? "active" : ""}" href="/employees"><span aria-hidden="true">♙</span> 직원 명부</a>
-    <a class="${active === "payroll" ? "active" : ""}" href="/payroll"><span aria-hidden="true">₩</span> 급여 관리</a>
-  </nav>`;
+const navigationGroups = Object.freeze([
+  Object.freeze({ label: "WORKSPACE", links: Object.freeze([
+    Object.freeze({ active: "home", href: "/app", icon: "⌂", label: "홈", description: "내 부서 업무 시작", permission: PERMISSIONS.HOME }),
+  ]) }),
+  Object.freeze({ label: "기준 정보", links: Object.freeze([
+    Object.freeze({ active: "sales", href: "/partners/sales", icon: "↗", label: "판매처", description: "판매 거래처 등록", permission: PERMISSIONS.SALES_PARTNERS }),
+    Object.freeze({ active: "purchases", href: "/partners/purchases", icon: "↙", label: "구매처", description: "구매 거래처 등록", permission: PERMISSIONS.PURCHASE_PARTNERS }),
+    Object.freeze({ active: "items", href: "/items", icon: "◇", label: "품목", description: "품목·재고 기준정보", permission: PERMISSIONS.ITEMS_MANAGE }),
+  ]) }),
+  Object.freeze({ label: "업무 관리", links: Object.freeze([
+    Object.freeze({ active: "sales-orders", href: "/sales-orders", icon: "↗", label: "주문 · 출고", description: "판매 주문과 출고", permission: PERMISSIONS.SALES_ORDERS_VIEW }),
+    Object.freeze({ active: "purchase-orders", href: "/purchase-orders", icon: "▦", label: "발주 관리", description: "구매 발주와 입고", permission: PERMISSIONS.PURCHASE_ORDERS_VIEW }),
+    Object.freeze({ active: "production", href: "/production", icon: "⚙", label: "생산 관리", description: "BOM과 생산 지시", permission: PERMISSIONS.PRODUCTION_MANAGE }),
+    Object.freeze({ active: "inventory", href: "/inventory", icon: "▤", label: "재고 현황", description: "세 창고별 현재고", permission: PERMISSIONS.INVENTORY_VIEW }),
+  ]) }),
+  Object.freeze({ label: "보고서", links: Object.freeze([
+    Object.freeze({ active: "monthly-report", href: "/reports/monthly", icon: "₩", label: "월간 매입·판매", description: "월간 금액과 회계월 마감", permission: PERMISSIONS.FINANCE_REPORT }),
+  ]) }),
+  Object.freeze({ label: "인사 · 급여", links: Object.freeze([
+    Object.freeze({ active: "employees", href: "/employees", icon: "♙", label: "직원 명부", description: "직원·급여 기준정보", permission: PERMISSIONS.EMPLOYEES_MANAGE }),
+    Object.freeze({ active: "payroll", href: "/payroll", icon: "₩", label: "급여 관리", description: "월 급여와 명세서", permission: PERMISSIONS.PAYROLL_MANAGE }),
+  ]) }),
+]);
+
+const allowedNavigationLinks = (user) => navigationGroups.flatMap(({ links }) => (
+  links.filter(({ permission }) => canAccess(user, permission))
+));
+
+const navigation = ({ active, user }) => `<nav aria-label="주 메뉴">${navigationGroups.map((group, index) => {
+  const links = group.links.filter(({ permission }) => canAccess(user, permission));
+  if (!links.length) return "";
+  return `<p${index ? ' class="nav-section"' : ""}>${escapeHtml(group.label)}</p>${links.map((link) => `<a class="${active === link.active ? "active" : ""}" href="${escapeHtml(link.href)}"><span aria-hidden="true">${escapeHtml(link.icon)}</span> ${escapeHtml(link.label)}</a>`).join("")}`;
+}).join("")}</nav>`;
 
 function workspacePage({ title, active, user, csrfToken, content }) {
   return document({
@@ -130,7 +152,7 @@ function workspacePage({ title, active, user, csrfToken, content }) {
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span>OhMyVibe<b>ERP</b></span>
           </a>
-          ${navigation({ active })}
+          ${navigation({ active, user })}
           <div class="sidebar-user">
             <span class="avatar">${escapeHtml(user.displayName.slice(0, 1))}</span>
             <div><strong>${escapeHtml(user.displayName)}</strong><small>${escapeHtml(user.role)}</small></div>
@@ -152,6 +174,21 @@ function workspacePage({ title, active, user, csrfToken, content }) {
 }
 
 export function appPage({ user, csrfToken, dashboard, asOfDate }) {
+  if (!dashboard) {
+    const department = departmentLabel(user);
+    const taskLinks = allowedNavigationLinks(user).filter(({ active }) => active !== "home");
+    return workspacePage({
+      title: `${department} 업무`,
+      active: "home",
+      user,
+      csrfToken,
+      content: `<section class="department-home">
+        <header><p class="form-kicker">MY DEPARTMENT</p><h1>${escapeHtml(department)} 업무</h1><p>${escapeHtml(user.displayName)}님에게 허용된 업무만 표시합니다.</p></header>
+        <aside><span aria-hidden="true">✓</span><p><strong>부서 권한이 적용되었습니다.</strong> 다른 부서 메뉴는 숨겨지고 URL이나 처리 요청으로 직접 접근해도 차단됩니다.</p></aside>
+        <div class="department-task-grid">${taskLinks.map((link) => `<a href="${escapeHtml(link.href)}"><span aria-hidden="true">${escapeHtml(link.icon)}</span><div><strong>${escapeHtml(link.label)}</strong><small>${escapeHtml(link.description)}</small></div><b aria-hidden="true">→</b></a>`).join("")}</div>
+      </section>`,
+    });
+  }
   const [year, month] = dashboard.month.split("-").map(Number);
   const lowStockItems = dashboard.lowStockItems.map((item) => `<article class="dashboard-stock-row" data-dashboard-low-stock>
     <div class="dashboard-row-heading"><div><span class="record-code">${escapeHtml(item.code)}</span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "분류 미등록")} · ${escapeHtml(item.unit)}</small></div><span class="dashboard-alert-badge">${item.shortageQuantity > 0 ? `${escapeHtml(formatQuantity(item.shortageQuantity, item.unit))} 부족` : "안전재고 도달"}</span></div>
@@ -580,6 +617,9 @@ export function purchaseOrdersPage({
   const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
   const lines = Array.from({ length: 5 }, (_, index) => values.lines?.[index] ?? {});
   const prerequisitesReady = suppliers.length > 0 && items.length > 0;
+  const canCreatePurchase = canAccess(user, PERMISSIONS.PURCHASE_ORDERS_CREATE);
+  const canReceive = canAccess(user, PERMISSIONS.PURCHASE_RECEIVE);
+  const canViewPurchaseAmounts = canCreatePurchase;
 
   const supplierOptions = suppliers.map((supplier) => (
     `<option value="${escapeHtml(supplier.id)}"${values.supplierId === supplier.id ? " selected" : ""}>${escapeHtml(supplier.code)} · ${escapeHtml(supplier.name)}</option>`
@@ -602,11 +642,13 @@ export function purchaseOrdersPage({
           <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
           <td><strong class="received-quantity">${escapeHtml(formatQuantity(line.receivedQuantity, item?.unit ?? ""))}</strong></td>
           <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
-          <td class="number-cell">${escapeHtml(formatMoney(line.unitPrice))}</td>
-          <td class="number-cell">${escapeHtml(formatMoney(line.quantity * line.unitPrice))}</td>
+          <td class="number-cell">${canViewPurchaseAmounts ? escapeHtml(formatMoney(line.unitPrice)) : "—"}</td>
+          <td class="number-cell">${canViewPurchaseAmounts ? escapeHtml(formatMoney(line.quantity * line.unitPrice)) : "—"}</td>
         </tr>`;
       }).join("");
-      const receiptFields = order.status !== "received"
+      const receiptFields = order.status !== "received" && !canReceive
+        ? `<div class="restricted-action"><span aria-hidden="true">↙</span><div><strong>입고 처리는 물류 부서 업무입니다.</strong><p>발주 내용은 조회할 수 있지만 재고 반영은 물류 계정에서만 실행합니다.</p></div></div>`
+        : order.status !== "received"
         ? `<form action="/purchase-orders/${escapeHtml(order.id)}/receive" method="post" class="receipt-form">
             <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
             <div class="receipt-heading"><div><span>GOODS RECEIPT</span><h3>입고 처리</h3></div><p>실제로 도착한 수량만 입력하세요. 저장 즉시 ${escapeHtml(warehouse?.name ?? "입고 창고")} 재고가 늘어납니다.</p></div>
@@ -633,7 +675,7 @@ export function purchaseOrdersPage({
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>발주일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>입고 예정</dt><dd>${escapeHtml(order.expectedDate ? formatDate(order.expectedDate) : "미정")}</dd></div></dl></div>
         </header>
         <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>발주</th><th>입고</th><th>미입고</th><th>단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><p>발주 합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p></div>
+        <div class="order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><p>${canViewPurchaseAmounts ? `발주 합계 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong>` : "발주 금액은 구매 부서 전용"}</p></div>
         ${receiptFields}
       </article>`;
     }).join("")
@@ -655,9 +697,9 @@ export function purchaseOrdersPage({
     content: `<section class="purchase-content">
       <header class="purchase-heading"><div><p class="form-kicker">PURCHASE ORDER</p><h1>발주 관리</h1><p>구매처에 발주하고 입고된 수량을 창고 재고에 바로 반영합니다.</p></div><span><b>${orders.length}</b>건 발주</span></header>
       ${notice}
-      ${!prerequisitesReady ? `<div class="prerequisite-notice"><strong>발주 전에 기준정보가 필요합니다.</strong><p>${!suppliers.length ? "구매처" : ""}${!suppliers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
+      ${canCreatePurchase && !prerequisitesReady ? `<div class="prerequisite-notice"><strong>발주 전에 기준정보가 필요합니다.</strong><p>${!suppliers.length ? "구매처" : ""}${!suppliers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
 
-      <details class="purchase-create"${!orders.length || error && !receiptOrderId ? " open" : ""}>
+      ${canCreatePurchase ? `<details class="purchase-create"${!orders.length || error && !receiptOrderId ? " open" : ""}>
         <summary><span><i>NEW</i><strong>새 발주 등록</strong></span><em>구매처·입고 창고·품목 선택</em></summary>
         <form action="/purchase-orders" method="post" class="purchase-form">
           <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
@@ -677,7 +719,7 @@ export function purchaseOrdersPage({
           </div>
           <div class="purchase-form-footer"><input name="note" value="${escapeHtml(values.note)}" placeholder="발주 메모 (선택)" maxlength="500"><button type="submit"${!prerequisitesReady ? " disabled" : ""}>발주 등록 <span aria-hidden="true">→</span></button></div>
         </form>
-      </details>
+      </details>` : ""}
 
       <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고 현황</h2></div>${orderCards}</section>
     </section>`,
@@ -872,6 +914,9 @@ export function salesOrdersPage({
   const lines = Array.from({ length: 5 }, (_, index) => values.lines?.[index] ?? {});
   const prerequisitesReady = customers.length > 0 && items.length > 0;
   const totalReceivable = Math.round(orders.reduce((total, order) => total + Number(order.receivableAmount || 0), 0) * 100) / 100;
+  const canCreateSales = canAccess(user, PERMISSIONS.SALES_ORDERS_CREATE);
+  const canShip = canAccess(user, PERMISSIONS.SALES_SHIP);
+  const canViewSalesAmounts = canCreateSales;
 
   const customerOptions = customers.map((customer) => (
     `<option value="${escapeHtml(customer.id)}"${values.customerId === customer.id ? " selected" : ""}>${escapeHtml(customer.code)} · ${escapeHtml(customer.name)}</option>`
@@ -894,11 +939,13 @@ export function salesOrdersPage({
           <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
           <td><strong class="shipped-quantity">${escapeHtml(formatQuantity(line.shippedQuantity, item?.unit ?? ""))}</strong></td>
           <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
-          <td class="number-cell">${escapeHtml(formatMoney(line.unitPrice))}</td>
-          <td class="number-cell">${escapeHtml(formatMoney(line.quantity * line.unitPrice))}</td>
+          <td class="number-cell">${canViewSalesAmounts ? escapeHtml(formatMoney(line.unitPrice)) : "—"}</td>
+          <td class="number-cell">${canViewSalesAmounts ? escapeHtml(formatMoney(line.quantity * line.unitPrice)) : "—"}</td>
         </tr>`;
       }).join("");
-      const shipmentFields = order.status !== "shipped"
+      const shipmentFields = order.status !== "shipped" && !canShip
+        ? `<div class="restricted-action"><span aria-hidden="true">↗</span><div><strong>출고 처리는 물류 부서 업무입니다.</strong><p>주문 내용은 조회할 수 있지만 재고·받을 금액 반영은 물류 계정에서만 실행합니다.</p></div></div>`
+        : order.status !== "shipped"
         ? `<form action="/sales-orders/${escapeHtml(order.id)}/ship" method="post" class="receipt-form shipment-form">
             <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
             <div class="receipt-heading"><div><span>SHIPMENT</span><h3>출고 처리</h3></div><p>실제로 내보낼 수량을 입력하세요. 저장 즉시 ${escapeHtml(warehouse?.name ?? "출고 창고")} 재고가 줄고 받을 금액이 늘어납니다.</p></div>
@@ -926,7 +973,7 @@ export function salesOrdersPage({
           <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>주문일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>출고 요청</dt><dd>${escapeHtml(order.requestedShipDate ? formatDate(order.requestedShipDate) : "미정")}</dd></div></dl></div>
         </header>
         <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>주문</th><th>출고</th><th>미출고</th><th>판매 단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
-        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div></div>
+        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span>${canViewSalesAmounts ? `<div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div>` : `<p>주문·채권 금액은 영업 부서 전용</p>`}</div>
         ${shipmentFields}
       </article>`;
     }).join("")
@@ -948,9 +995,9 @@ export function salesOrdersPage({
     content: `<section class="purchase-content sales-content">
       <header class="purchase-heading sales-heading"><div><p class="form-kicker">SALES ORDER</p><h1>주문 · 출고</h1><p>판매 주문을 접수하고 출고 재고와 받을 금액을 함께 관리합니다.</p></div><div class="sales-summary"><span>누적 받을 금액</span><strong>${escapeHtml(formatMoney(totalReceivable))}</strong></div></header>
       ${notice}
-      ${!prerequisitesReady ? `<div class="prerequisite-notice"><strong>주문 전에 기준정보가 필요합니다.</strong><p>${!customers.length ? "판매처" : ""}${!customers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
+      ${canCreateSales && !prerequisitesReady ? `<div class="prerequisite-notice"><strong>주문 전에 기준정보가 필요합니다.</strong><p>${!customers.length ? "판매처" : ""}${!customers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
 
-      <details class="purchase-create sales-create"${!orders.length || error && !shipmentOrderId ? " open" : ""}>
+      ${canCreateSales ? `<details class="purchase-create sales-create"${!orders.length || error && !shipmentOrderId ? " open" : ""}>
         <summary><span><i>NEW</i><strong>새 판매 주문 등록</strong></span><em>판매처·출고 창고·품목 선택</em></summary>
         <form action="/sales-orders" method="post" class="purchase-form">
           <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
@@ -970,7 +1017,7 @@ export function salesOrdersPage({
           </div>
           <div class="purchase-form-footer"><input name="note" value="${escapeHtml(values.note)}" placeholder="주문 메모 (선택)" maxlength="500"><button type="submit"${!prerequisitesReady ? " disabled" : ""}>주문 등록 <span aria-hidden="true">→</span></button></div>
         </form>
-      </details>
+      </details>` : ""}
 
       <section class="orders-section"><div class="orders-title"><p>ORDER & SHIPMENT</p><h2>주문·출고 현황</h2></div>${orderCards}</section>
     </section>`,
