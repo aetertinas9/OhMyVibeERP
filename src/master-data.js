@@ -508,6 +508,80 @@ export class MasterDataRepository {
     return copy(run);
   }
 
+  async executiveDashboard(monthInput) {
+    const [data, tradeSummary] = await Promise.all([
+      this.data(),
+      this.monthlyTradeSummary(monthInput),
+    ]);
+    const warehouseMap = new Map(WAREHOUSES.map((warehouse) => [warehouse.id, warehouse]));
+    const partnerMap = new Map(data.partners.map((partner) => [partner.id, partner]));
+
+    const lowStockItems = data.items
+      .map(itemWithWarehouseStock)
+      .filter((item) => Number(item.safetyStock || 0) > 0 && item.openingStock <= Number(item.safetyStock))
+      .map((item) => ({
+        id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        unit: item.unit,
+        stockByWarehouse: item.stockByWarehouse,
+        totalStock: item.openingStock,
+        safetyStock: Number(item.safetyStock),
+        shortageQuantity: roundMoney(Math.max(Number(item.safetyStock) - item.openingStock, 0)),
+      }))
+      .sort((left, right) => (
+        right.shortageQuantity - left.shortageQuantity || left.code.localeCompare(right.code)
+      ));
+
+    const receivableOrders = data.salesOrders
+      .map((order) => ({
+        id: order.id,
+        number: order.number,
+        customerId: order.customerId,
+        customerName: partnerMap.get(order.customerId)?.name ?? "알 수 없는 판매처",
+        warehouseId: order.warehouseId,
+        warehouseName: warehouseMap.get(order.warehouseId)?.name ?? order.warehouseId,
+        status: order.status,
+        orderDate: order.orderDate,
+        lastShippedAt: order.shipments
+          .map(({ shippedAt }) => shippedAt)
+          .sort((left, right) => right.localeCompare(left))[0] ?? "",
+        receivableAmount: Number(order.receivableAmount || 0),
+      }))
+      .filter(({ receivableAmount }) => Number.isFinite(receivableAmount) && receivableAmount > 0)
+      .sort((left, right) => (
+        right.lastShippedAt.localeCompare(left.lastShippedAt) || right.number.localeCompare(left.number)
+      ));
+
+    const recentSales = tradeSummary.transactions
+      .filter(({ type }) => type === "sale")
+      .slice(0, 5)
+      .map((transaction) => ({
+        id: transaction.id,
+        documentNumber: transaction.documentNumber,
+        occurredAt: transaction.occurredAt,
+        customerName: partnerMap.get(transaction.partnerId)?.name ?? "알 수 없는 판매처",
+        warehouseName: warehouseMap.get(transaction.warehouseId)?.name ?? transaction.warehouseId,
+        amount: transaction.amount,
+      }));
+
+    return copy({
+      month: tradeSummary.month,
+      totalItemCount: data.items.length,
+      lowStockCount: lowStockItems.length,
+      lowStockItems,
+      monthlySalesAmount: tradeSummary.salesAmount,
+      monthlyShipmentCount: tradeSummary.salesCount,
+      recentSales,
+      outstandingReceivableAmount: roundMoney(receivableOrders.reduce((total, order) => (
+        total + order.receivableAmount
+      ), 0)),
+      receivableOrderCount: receivableOrders.length,
+      receivableOrders,
+    });
+  }
+
   async monthlyTradeSummary(monthInput) {
     const { month, start, end } = monthBounds(monthInput);
     const data = await this.data();
