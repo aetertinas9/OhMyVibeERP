@@ -15,6 +15,7 @@ import {
 } from "./auth.js";
 import {
   appPage,
+  employeePage,
   inventoryPage,
   itemPage,
   loginPage,
@@ -406,6 +407,73 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/employees") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const allEmployees = await masterData.listEmployees();
+      const query = String(url.searchParams.get("q") ?? "").trim().slice(0, 60);
+      const department = String(url.searchParams.get("department") ?? "").trim().slice(0, 60);
+      const normalizedQuery = query.toLocaleLowerCase("ko-KR");
+      const employees = allEmployees.filter((employee) => (
+        (!department || employee.department === department)
+        && (!normalizedQuery || [employee.employeeNumber, employee.name, employee.email]
+          .some((value) => String(value).toLocaleLowerCase("ko-KR").includes(normalizedQuery)))
+      ));
+      send(response, 200, employeePage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        employees,
+        totalEmployees: allEmployees.length,
+        departments: [...new Set(allEmployees.map(({ department: name }) => name))],
+        filters: { query, department },
+        values: { hireDate: today(), employmentType: "regular", workLocation: "서울", mealAllowance: "200000" },
+        created: url.searchParams.get("created") === "1",
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/employees") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const values = Object.fromEntries([
+        "employeeNumber", "name", "department", "position", "workLocation", "hireDate", "email",
+        "employmentType", "baseSalary", "mealAllowance", "otherAllowance", "fixedDeduction", "note",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createEmployee(values, session.user.id);
+        redirect(response, "/employees?created=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof DuplicateRecordError)) throw error;
+        const employees = await masterData.listEmployees();
+        send(response, error.statusCode, employeePage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          employees,
+          totalEmployees: employees.length,
+          departments: [...new Set(employees.map(({ department }) => department))],
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/purchase-orders") {
       if (!session) {
         redirect(response, "/login", [], secure);
@@ -782,7 +850,7 @@ export async function createRequestHandler({
 
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
-      "/production", "/production/boms", "/production/orders", "/reports/monthly",
+      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/employees",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch);
     send(
       response,

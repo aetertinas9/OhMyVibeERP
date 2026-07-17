@@ -778,3 +778,75 @@ button, input { font: inherit; }
   .warehouse-grid { grid-template-columns: 1fr; }
   .warehouse-card { min-height: 150px; }
 }
+
+/* Employees */
+.people-content { width: min(100%,1500px); margin: 0 auto; padding: 54px 48px 80px; }
+.people-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 25px; }
+.people-heading .form-kicker { margin-bottom: 9px; color: #6e5792; }
+.people-heading h1 { margin: 0; color: var(--ink); font-size: clamp(28px,3vw,40px); letter-spacing: -.045em; }
+.people-heading > div > p:last-child { margin: 9px 0 0; color: #74817c; font-size: 13px; }
+.people-count { min-width: 150px; padding: 12px 16px; border: 1px solid #d9dcd6; border-radius: 8px; background: rgba(255,255,255,.55); text-align: right; }
+.people-count span { display: block; color: #8a9490; font-size: 9px; }
+.people-count strong { display: block; margin-top: 2px; color: #684b82; font-size: 24px; }
+.people-count small { margin-left: 3px; color: #8a9490; font-size: 9px; }
+.synthetic-notice { display: flex; align-items: center; gap: 11px; margin-bottom: 18px; padding: 13px 15px; border: 1px solid #d8cbe4; border-radius: 8px; color: #69567a; background: #f8f2fb; }
+.synthetic-notice > span { display: grid; place-items: center; flex: 0 0 auto; width: 25px; height: 25px; border-radius: 50%; color: #fff; background: #76558f; font-size: 9px; font-weight: 800; }
+.synthetic-notice p { margin: 0; font-size: 10px; line-height: 1.55; }
+.synthetic-notice strong { margin-right: 4px; color: #583d6d; }
+.employee-create { margin-bottom: 25px; overflow: hidden; border: 1px solid #d9ddd7; border-radius: 10px; background: rgba(255,255,255,.65); box-shadow: 0 7px 24px rgba(36,54,48,.04); }
+.employee-create summary { display: flex; align-items: center; justify-content: space-between; min-height: 65px; padding: 0 22px; cursor: pointer; list-style: none; }
+.employee-create summary::-webkit-details-marker { display: none; }
+.employee-create summary span { display: flex; align-items: center; gap: 10px; }
+.employee-create summary i { padding: 4px 6px; border-radius: 4px; color: #fff; background: #6e5085; font-size: 8px; font-style: normal; }
+.employee-create summary strong { color: #34443e; font-size: 13px; }
+.employee-create summary em { color: #939c98; font-size: 9px; font-style: normal; }
+.employee-create[open] summary { border-bottom: 1px solid #e2e4de; }
+.employee-form { display: grid; gap: 20px; padding: 24px; }
+.employee-form fieldset { margin: 0; padding: 18px; border: 1px solid #e0e2dc; border-radius: 8px; background: #fafaf7; }
+.employee-form legend { padding: 0 7px; color: #46564f; font-size: 11px; font-weight: 700; }
+.employee-form fieldset > p { margin: -2px 0 15px; color: #8e9894; font-size: 9px; }
+.employee-form-grid { display: grid; gap: 13px; }
+.employee-form-grid.basic { grid-template-columns: repeat(4,1fr); }
+.employee-form-grid.salary { grid-template-columns: repeat(4,1fr); }
+.employee-form label { display: grid; gap: 7px; min-width: 0; color: #40504a; font-size: 10px; font-weight: 600; }
+.employee-form label > b { color: #d7802d; }
+.employee-form input, .employee-form select, .employee-form-actions input, .employee-filters input, .employee-filters select { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #d6dad4; border-radius: 7px; outline: none; color: var(--ink); background: #fff; font-size: 10px; }
+.employee-form input:focus, .employee-form select:focus, .employee-form-actions input:focus, .employee-filters input:focus, .employee-filters select:focus { border-color: var(--green-light); box-shadow: 0 0 0 3px rgba(28,80,69,.1); }
+.employee-form [aria-invalid="true"] { border-color: #bf6a53; background: #fffafa; }
+.employee-form-actions { display: grid; grid-template-columns: 1fr 150px; gap: 12px; }
+.employee-form-actions button { border: 0; border-radius: 7px; color: #fff; background: var(--green); cursor: pointer; font-size: 10px; font-weight: 700; }
+.employee-form-actions button span { margin-left: 7px; color: var(--orange); }
+.employee-directory { overflow: hidden; border: 1px solid #d9ddd7; border-radius: 11px; background: rgba(255,255,255,.68); box-shadow: 0 8px 25px rgba(36,54,48,.04); }
+.employee-directory-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 84px; padding: 18px 22px; border-bottom: 1px solid #e2e4de; }
+.employee-directory-heading p { margin: 0 0 5px; color: #76558f; font-size: 8px; font-weight: 700; letter-spacing: .16em; }
+.employee-directory-heading h2 { margin: 0; color: var(--ink); font-size: 17px; }
+.employee-filters { display: grid; grid-template-columns: minmax(180px,260px) 150px 65px 48px; gap: 7px; }
+.employee-filters button { border: 0; border-radius: 6px; color: #fff; background: var(--green); cursor: pointer; font-size: 9px; }
+.employee-filters a { display: grid; place-items: center; color: #77847f; font-size: 9px; text-decoration: none; }
+.directory-summary { display: flex; justify-content: space-between; gap: 20px; padding: 11px 22px; border-bottom: 1px solid #e7e9e3; color: #87928d; background: #fafaf7; font-size: 9px; }
+.directory-summary strong { margin: 0 2px; color: #4c5d56; }
+.employee-directory table { width: 100%; min-width: 1050px; border-collapse: collapse; }
+.employee-directory th { height: 40px; padding: 0 14px; color: #89938f; background: #f5f5f0; font-size: 8px; text-align: left; white-space: nowrap; }
+.employee-directory td { height: 61px; padding: 10px 14px; border-top: 1px solid #e8e9e4; color: #5d6a65; font-size: 9px; white-space: nowrap; }
+.employee-directory td > strong { display: block; color: #34443e; font-size: 10px; }
+.employee-directory td > small { display: block; margin-top: 4px; color: #9aa39f; font-size: 8px; }
+.employee-directory .record-code { display: inline-block; }
+.synthetic-label { color: #805d99 !important; }
+
+@media (max-width: 1050px) {
+  .employee-form-grid.basic { grid-template-columns: 1fr 1fr; }
+  .employee-form-grid.salary { grid-template-columns: 1fr 1fr; }
+  .employee-directory-heading { align-items: flex-start; flex-direction: column; }
+  .employee-filters { width: 100%; }
+}
+
+@media (max-width: 760px) {
+  .people-content { padding: 40px 18px 65px; }
+  .people-heading { align-items: flex-start; flex-direction: column; }
+  .people-count { width: 100%; text-align: left; }
+  .synthetic-notice { align-items: flex-start; }
+  .employee-form { padding: 18px; }
+  .employee-form-grid.basic, .employee-form-grid.salary, .employee-form-actions, .employee-filters { grid-template-columns: 1fr; }
+  .employee-create summary em { display: none; }
+  .directory-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
+}

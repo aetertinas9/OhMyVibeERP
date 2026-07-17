@@ -114,7 +114,9 @@ const navigation = ({ active }) => `
     <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
     <p class="nav-section">보고서</p>
     <a class="${active === "monthly-report" ? "active" : ""}" href="/reports/monthly"><span aria-hidden="true">₩</span> 월간 매입·판매</a>
-    <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
+    <p class="nav-section">인사 · 급여</p>
+    <a class="${active === "employees" ? "active" : ""}" href="/employees"><span aria-hidden="true">♙</span> 직원 명부</a>
+    <a href="#" aria-disabled="true"><span aria-hidden="true">₩</span> 급여 관리 <em>준비 중</em></a>
   </nav>`;
 
 function workspacePage({ title, active, user, csrfToken, content }) {
@@ -650,6 +652,86 @@ export function purchaseOrdersPage({
       </details>
 
       <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고 현황</h2></div>${orderCards}</section>
+    </section>`,
+  });
+}
+
+const employmentTypeLabels = {
+  regular: "정규직",
+  contract: "계약직",
+  "part-time": "시간제",
+};
+
+export function employeePage({
+  user,
+  csrfToken,
+  employees,
+  totalEmployees,
+  departments,
+  filters = {},
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+}) {
+  const totalBaseSalary = employees.reduce((total, employee) => total + Number(employee.baseSalary || 0), 0);
+  const departmentOptions = departments.map((department) => (
+    `<option value="${escapeHtml(department)}"${filters.department === department ? " selected" : ""}>${escapeHtml(department)}</option>`
+  )).join("");
+  const employeeRows = employees.map((employee) => `<tr data-employee-row>
+    <td><strong class="record-code">${escapeHtml(employee.employeeNumber)}</strong>${employee.isSynthetic ? `<small class="synthetic-label">합성 데이터</small>` : ""}</td>
+    <td><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.email)}</small></td>
+    <td><strong>${escapeHtml(employee.department)}</strong><small>${escapeHtml(employee.position)}</small></td>
+    <td><strong>${escapeHtml(employee.workLocation)}</strong><small>${escapeHtml(employmentTypeLabels[employee.employmentType] ?? employee.employmentType)}</small></td>
+    <td><strong>${escapeHtml(formatDate(employee.hireDate))}</strong><small>${employee.employmentStatus === "active" ? "재직" : "퇴직"}</small></td>
+    <td class="number-cell"><strong>${escapeHtml(formatMoney(employee.baseSalary))}</strong><small>식대 ${escapeHtml(formatMoney(employee.mealAllowance))}</small></td>
+    <td class="number-cell"><strong>${escapeHtml(formatMoney(employee.fixedDeduction))}</strong><small>등록 공제액</small></td>
+  </tr>`).join("");
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">직원 등록을 완료했습니다.</div>`
+      : "";
+
+  return workspacePage({
+    title: "직원 명부",
+    active: "employees",
+    user,
+    csrfToken,
+    content: `<section class="people-content">
+      <header class="people-heading"><div><p class="form-kicker">PEOPLE DIRECTORY</p><h1>직원 명부</h1><p>재직자와 급여 산정 기준정보를 한곳에서 관리합니다.</p></div><div class="people-count"><span>전체 직원</span><strong>${totalEmployees.toLocaleString("ko-KR")}<small>명</small></strong></div></header>
+      ${notice}
+      <aside class="synthetic-notice"><span aria-hidden="true">S</span><p><strong>초기 직원 100명은 테스트용 합성 데이터입니다.</strong> 실제 인물의 개인정보가 아니며 직원번호·이름·부서·직급·급여 기준정보가 각각 저장되어 있습니다.</p></aside>
+
+      <details class="employee-create"${error ? " open" : ""}>
+        <summary><span><i>NEW</i><strong>새 직원 등록</strong></span><em>인사·급여 기준정보 입력</em></summary>
+        <form action="/employees" method="post" class="employee-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <fieldset><legend>기본 정보</legend><div class="employee-form-grid basic">
+            <label>직원번호 <b>*</b><input name="employeeNumber" value="${escapeHtml(values.employeeNumber)}" placeholder="예: EMP-0101" maxlength="20" required${inputState("employeeNumber", fieldErrors)}>${fieldError("employeeNumber", fieldErrors)}</label>
+            <label>이름 <b>*</b><input name="name" value="${escapeHtml(values.name)}" maxlength="60" required${inputState("name", fieldErrors)}>${fieldError("name", fieldErrors)}</label>
+            <label>부서 <b>*</b><input name="department" value="${escapeHtml(values.department)}" list="employee-departments" maxlength="60" required${inputState("department", fieldErrors)}><datalist id="employee-departments">${departments.map((department) => `<option value="${escapeHtml(department)}"></option>`).join("")}</datalist>${fieldError("department", fieldErrors)}</label>
+            <label>직급 <b>*</b><input name="position" value="${escapeHtml(values.position)}" placeholder="예: 대리" maxlength="40" required${inputState("position", fieldErrors)}>${fieldError("position", fieldErrors)}</label>
+            <label>근무지 <b>*</b><select name="workLocation" required${inputState("workLocation", fieldErrors)}>${["서울", "인천", "부산"].map((location) => `<option value="${location}"${values.workLocation === location ? " selected" : ""}>${location}</option>`).join("")}</select>${fieldError("workLocation", fieldErrors)}</label>
+            <label>입사일 <b>*</b><input name="hireDate" type="date" value="${escapeHtml(values.hireDate)}" required${inputState("hireDate", fieldErrors)}>${fieldError("hireDate", fieldErrors)}</label>
+            <label>이메일 <b>*</b><input name="email" type="email" value="${escapeHtml(values.email)}" placeholder="employee@company.example" maxlength="120" required${inputState("email", fieldErrors)}>${fieldError("email", fieldErrors)}</label>
+            <label>고용 형태 <b>*</b><select name="employmentType"${inputState("employmentType", fieldErrors)}>${Object.entries(employmentTypeLabels).map(([value, label]) => `<option value="${value}"${values.employmentType === value ? " selected" : ""}>${label}</option>`).join("")}</select>${fieldError("employmentType", fieldErrors)}</label>
+          </div></fieldset>
+          <fieldset><legend>월 급여 기준</legend><p>법정 공제는 자동 계산하지 않습니다. 회사에서 확인한 월 고정 공제 총액을 등록하세요.</p><div class="employee-form-grid salary">
+            <label>월 기본급 <b>*</b><span class="money-input"><input name="baseSalary" type="number" value="${escapeHtml(values.baseSalary)}" min="1" max="999999999999" step="1" required${inputState("baseSalary", fieldErrors)}><i>원</i></span>${fieldError("baseSalary", fieldErrors)}</label>
+            <label>식대<span class="money-input"><input name="mealAllowance" type="number" value="${escapeHtml(values.mealAllowance)}" min="0" max="999999999999" step="1"${inputState("mealAllowance", fieldErrors)}><i>원</i></span>${fieldError("mealAllowance", fieldErrors)}</label>
+            <label>기타 수당<span class="money-input"><input name="otherAllowance" type="number" value="${escapeHtml(values.otherAllowance)}" min="0" max="999999999999" step="1"${inputState("otherAllowance", fieldErrors)}><i>원</i></span>${fieldError("otherAllowance", fieldErrors)}</label>
+            <label>등록 공제액<span class="money-input"><input name="fixedDeduction" type="number" value="${escapeHtml(values.fixedDeduction)}" min="0" max="999999999999" step="1"${inputState("fixedDeduction", fieldErrors)}><i>원</i></span>${fieldError("fixedDeduction", fieldErrors)}</label>
+          </div></fieldset>
+          <div class="employee-form-actions"><input name="note" value="${escapeHtml(values.note)}" placeholder="인사 메모 (선택)" maxlength="500"><button type="submit">직원 등록 <span aria-hidden="true">→</span></button></div>
+        </form>
+      </details>
+
+      <section class="employee-directory">
+        <div class="employee-directory-heading"><div><p>ALL EMPLOYEES</p><h2>재직자 목록</h2></div><form action="/employees" method="get" class="employee-filters"><input name="q" value="${escapeHtml(filters.query)}" placeholder="이름·직원번호·이메일 검색"><select name="department"><option value="">전체 부서</option>${departmentOptions}</select><button type="submit">검색</button><a href="/employees">초기화</a></form></div>
+        <div class="directory-summary"><span>검색 결과 <strong>${employees.length.toLocaleString("ko-KR")}</strong>명</span><span>표시 직원 월 기본급 합계 <strong>${escapeHtml(formatMoney(totalBaseSalary))}</strong></span></div>
+        ${employees.length ? `<div class="table-scroll"><table><thead><tr><th>직원번호</th><th>이름·이메일</th><th>부서·직급</th><th>근무지·고용</th><th>입사일·상태</th><th>월 기본급</th><th>공제 기준</th></tr></thead><tbody>${employeeRows}</tbody></table></div>` : `<div class="report-empty"><span aria-hidden="true">♙</span><strong>검색 조건에 맞는 직원이 없습니다.</strong><p>검색어나 부서 조건을 바꿔 주세요.</p></div>`}
+      </section>
     </section>`,
   });
 }
