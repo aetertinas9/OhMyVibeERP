@@ -30,6 +30,7 @@ const emptyData = () => ({
   employees: createSyntheticEmployees(),
   payrollRuns: [],
   periodClosures: [],
+  settlements: [],
 });
 const copy = (value) => structuredClone(value);
 const totalWarehouseStock = (stockByWarehouse) => (
@@ -184,6 +185,42 @@ function assertOpenPeriod(data, dateOrMonth) {
 }
 
 const roundMoney = (value) => Math.round(value * 100) / 100;
+
+function purchaseReceiptAmount(order, receipt) {
+  return roundMoney((receipt?.lines ?? []).reduce((total, receiptLine) => {
+    const orderLine = order.lines.find(({ id }) => id === receiptLine.lineId);
+    if (!orderLine) throw new BusinessRuleError("입고 이력의 발주 행을 찾을 수 없습니다.");
+    return total + Number(receiptLine.quantity) * Number(orderLine.unitPrice);
+  }, 0));
+}
+
+function purchaseOrderWithSettlement(order) {
+  const paidAmount = Number(order.paidAmount ?? 0);
+  const receivedAmount = roundMoney((order.receipts ?? []).reduce((total, receipt) => (
+    total + purchaseReceiptAmount(order, receipt)
+  ), 0));
+  const payableAmount = order.payableAmount === undefined
+    ? roundMoney(Math.max(receivedAmount - paidAmount, 0))
+    : Number(order.payableAmount);
+  if (![paidAmount, receivedAmount, payableAmount].every((amount) => Number.isFinite(amount) && amount >= 0)) {
+    throw new BusinessRuleError("발주의 지급 금액 정보가 올바르지 않습니다.");
+  }
+  return { ...order, receivedAmount, paidAmount, payableAmount };
+}
+
+function salesOrderWithSettlement(order) {
+  const receivableAmount = Number(order.receivableAmount ?? 0);
+  const collectedAmount = Number(order.collectedAmount ?? 0);
+  if (![receivableAmount, collectedAmount].every((amount) => Number.isFinite(amount) && amount >= 0)) {
+    throw new BusinessRuleError("판매 주문의 수금 금액 정보가 올바르지 않습니다.");
+  }
+  return {
+    ...order,
+    receivableAmount,
+    collectedAmount,
+    shippedAmount: roundMoney(receivableAmount + collectedAmount),
+  };
+}
 
 function validatePartner(type, input) {
   if (!PARTNER_TYPES.has(type)) throw new Error("알 수 없는 거래처 유형입니다.");
@@ -426,6 +463,28 @@ function validatePayrollRunInput(input) {
   return { payPeriod, payDate, note: cleanText(input.note, 500) };
 }
 
+function validateSettlementInput(input, type) {
+  const errors = {};
+  const isCollection = type === "collection";
+  const orderId = requiredText(input.orderId, "orderId", isCollection ? "판매 주문" : "구매 발주", 120, errors);
+  const transactionDate = dateValue(
+    input.transactionDate,
+    "transactionDate",
+    isCollection ? "입금일" : "지급일",
+    errors,
+    { required: true },
+  );
+  const amount = numericValue(input.amount, {
+    field: "amount",
+    label: isCollection ? "입금액" : "지급액",
+    maximum: MAX_MONEY,
+    decimals: 2,
+  }, errors);
+  if (!errors.amount && amount <= 0) errors.amount = `${isCollection ? "입금액" : "지급액"}은(는) 0보다 커야 합니다.`;
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return { orderId, transactionDate, amount, note: cleanText(input.note, 300) };
+}
+
 function validateStoredData(value) {
   if (
     !value
@@ -439,6 +498,7 @@ function validateStoredData(value) {
     || (value.employees !== undefined && !Array.isArray(value.employees))
     || (value.payrollRuns !== undefined && !Array.isArray(value.payrollRuns))
     || (value.periodClosures !== undefined && !Array.isArray(value.periodClosures))
+    || (value.settlements !== undefined && !Array.isArray(value.settlements))
   ) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
@@ -451,6 +511,7 @@ function validateStoredData(value) {
     employees: value.employees ?? createSyntheticEmployees(),
     payrollRuns: value.payrollRuns ?? [],
     periodClosures: value.periodClosures ?? [],
+    settlements: value.settlements ?? [],
   };
 }
 
@@ -500,12 +561,12 @@ export class MasterDataRepository {
 
   async listPurchaseOrders() {
     const data = await this.data();
-    return copy(data.purchaseOrders);
+    return copy(data.purchaseOrders.map(purchaseOrderWithSettlement));
   }
 
   async listSalesOrders() {
     const data = await this.data();
-    return copy(data.salesOrders);
+    return copy(data.salesOrders.map(salesOrderWithSettlement));
   }
 
   async listBillsOfMaterials() {
@@ -564,6 +625,160 @@ export class MasterDataRepository {
       };
       data.periodClosures.unshift(record);
       return { ...record, closedThrough: month };
+    });
+  }
+
+  async settlementOverview() {
+    const data = await this.data();
+    const salesOrders = data.salesOrders.map(salesOrderWithSettlement);
+    const purchaseOrders = data.purchaseOrders.map(purchaseOrderWithSettlement);
+    const salesByPartner = new Map();
+    const purchasesByPartner = new Map();
+
+    for (const order of salesOrders) {
+      const current = salesByPartner.get(order.customerId) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 };
+      current.transactionAmount = roundMoney(current.transactionAmount + order.shippedAmount);
+      current.settledAmount = roundMoney(current.settledAmount + order.collectedAmount);
+      current.balance = roundMoney(current.balance + order.receivableAmount);
+      if (order.receivableAmount > 0) current.documentCount += 1;
+      salesByPartner.set(order.customerId, current);
+    }
+    for (const order of purchaseOrders) {
+      const current = purchasesByPartner.get(order.supplierId) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 };
+      current.transactionAmount = roundMoney(current.transactionAmount + order.receivedAmount);
+      current.settledAmount = roundMoney(current.settledAmount + order.paidAmount);
+      current.balance = roundMoney(current.balance + order.payableAmount);
+      if (order.payableAmount > 0) current.documentCount += 1;
+      purchasesByPartner.set(order.supplierId, current);
+    }
+
+    const partnerBalances = (type, balanceMap) => data.partners
+      .filter((partner) => partner.type === type)
+      .map((partner) => ({
+        partnerId: partner.id,
+        code: partner.code,
+        name: partner.name,
+        ...(balanceMap.get(partner.id) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 }),
+      }))
+      .sort((left, right) => right.balance - left.balance || left.code.localeCompare(right.code));
+
+    const partnerMap = new Map(data.partners.map((partner) => [partner.id, partner]));
+    const orderMap = new Map([
+      ...salesOrders.map((order) => [order.id, order]),
+      ...purchaseOrders.map((order) => [order.id, order]),
+    ]);
+    const transactions = [...data.settlements]
+      .sort((left, right) => (
+        right.transactionDate.localeCompare(left.transactionDate)
+        || right.createdAt.localeCompare(left.createdAt)
+        || right.number.localeCompare(left.number)
+      ))
+      .map((transaction) => ({
+        ...transaction,
+        partnerCode: partnerMap.get(transaction.partnerId)?.code ?? transaction.partnerId,
+        partnerName: partnerMap.get(transaction.partnerId)?.name ?? "알 수 없는 거래처",
+        documentNumber: orderMap.get(transaction.orderId)?.number ?? transaction.orderId,
+      }));
+    const receivableDocuments = salesOrders
+      .filter(({ receivableAmount }) => receivableAmount > 0)
+      .map((order) => ({
+        id: order.id,
+        number: order.number,
+        partnerId: order.customerId,
+        partnerCode: partnerMap.get(order.customerId)?.code ?? order.customerId,
+        partnerName: partnerMap.get(order.customerId)?.name ?? "알 수 없는 판매처",
+        documentDate: order.orderDate,
+        transactionAmount: order.shippedAmount,
+        settledAmount: order.collectedAmount,
+        balance: order.receivableAmount,
+      }))
+      .sort((left, right) => right.documentDate.localeCompare(left.documentDate) || right.number.localeCompare(left.number));
+    const payableDocuments = purchaseOrders
+      .filter(({ payableAmount }) => payableAmount > 0)
+      .map((order) => ({
+        id: order.id,
+        number: order.number,
+        partnerId: order.supplierId,
+        partnerCode: partnerMap.get(order.supplierId)?.code ?? order.supplierId,
+        partnerName: partnerMap.get(order.supplierId)?.name ?? "알 수 없는 구매처",
+        documentDate: order.orderDate,
+        transactionAmount: order.receivedAmount,
+        settledAmount: order.paidAmount,
+        balance: order.payableAmount,
+      }))
+      .sort((left, right) => right.documentDate.localeCompare(left.documentDate) || right.number.localeCompare(left.number));
+
+    return copy({
+      receivableTotal: roundMoney(receivableDocuments.reduce((total, document) => total + document.balance, 0)),
+      payableTotal: roundMoney(payableDocuments.reduce((total, document) => total + document.balance, 0)),
+      customerBalances: partnerBalances("sales", salesByPartner),
+      supplierBalances: partnerBalances("purchases", purchasesByPartner),
+      receivableDocuments,
+      payableDocuments,
+      transactions,
+    });
+  }
+
+  async recordCustomerCollection(input, actorId) {
+    return this.recordSettlement("collection", input, actorId);
+  }
+
+  async recordSupplierPayment(input, actorId) {
+    return this.recordSettlement("payment", input, actorId);
+  }
+
+  async recordSettlement(type, input, actorId) {
+    if (type !== "collection" && type !== "payment") throw new Error("알 수 없는 정산 유형입니다.");
+    const validated = validateSettlementInput(input, type);
+    return this.mutate((data) => {
+      assertOpenPeriod(data, validated.transactionDate);
+      const isCollection = type === "collection";
+      const orders = isCollection ? data.salesOrders : data.purchaseOrders;
+      const order = orders.find(({ id }) => id === validated.orderId);
+      if (!order) throw new RecordNotFoundError(isCollection ? "판매 주문을 찾을 수 없습니다." : "구매 발주를 찾을 수 없습니다.");
+      const normalizedOrder = isCollection
+        ? salesOrderWithSettlement(order)
+        : purchaseOrderWithSettlement(order);
+      const balance = isCollection ? normalizedOrder.receivableAmount : normalizedOrder.payableAmount;
+      if (balance <= 0) {
+        throw new BusinessRuleError(isCollection ? "받을 금액이 남아 있지 않습니다." : "줄 금액이 남아 있지 않습니다.");
+      }
+      if (validated.amount > balance) {
+        throw new BusinessRuleError(
+          `${isCollection ? "입금액" : "지급액"}은 남은 ${isCollection ? "받을 돈" : "줄 돈"} ${balance.toLocaleString("ko-KR")}원을 초과할 수 없습니다.`,
+        );
+      }
+
+      const partnerId = isCollection ? order.customerId : order.supplierId;
+      const partnerType = isCollection ? "sales" : "purchases";
+      if (!data.partners.some((partner) => partner.id === partnerId && partner.type === partnerType)) {
+        throw new BusinessRuleError("정산할 거래처를 찾을 수 없습니다.");
+      }
+      if (isCollection) {
+        order.collectedAmount = roundMoney(normalizedOrder.collectedAmount + validated.amount);
+        order.receivableAmount = roundMoney(balance - validated.amount);
+      } else {
+        order.paidAmount = roundMoney(normalizedOrder.paidAmount + validated.amount);
+        order.payableAmount = roundMoney(balance - validated.amount);
+      }
+
+      const dateKey = validated.transactionDate.replaceAll("-", "");
+      const prefix = `${isCollection ? "RCPT" : "PAY"}-${dateKey}-`;
+      const sequence = data.settlements.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const record = {
+        id: `settlement_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        type,
+        partnerId,
+        orderId: order.id,
+        transactionDate: validated.transactionDate,
+        amount: validated.amount,
+        note: validated.note,
+        createdAt: this.now().toISOString(),
+        createdBy: cleanText(actorId, 120),
+      };
+      data.settlements.unshift(record);
+      return { ...record, remainingBalance: isCollection ? order.receivableAmount : order.payableAmount };
     });
   }
 
@@ -885,6 +1100,8 @@ export class MasterDataRepository {
         status: "ordered",
         lines,
         totalAmount: lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0),
+        payableAmount: 0,
+        paidAmount: 0,
         note: validated.note,
         receipts: [],
         createdAt: timestamp,
@@ -940,6 +1157,12 @@ export class MasterDataRepository {
 
       const isComplete = order.lines.every((line) => line.receivedQuantity === line.quantity);
       const timestamp = this.now().toISOString();
+      const normalizedOrder = purchaseOrderWithSettlement(order);
+      const receiptAmount = roundMoney(receiptLines.reduce((total, { line, quantity }) => (
+        total + quantity * line.unitPrice
+      ), 0));
+      order.paidAmount = normalizedOrder.paidAmount;
+      order.payableAmount = roundMoney(normalizedOrder.payableAmount + receiptAmount);
       order.status = isComplete ? "received" : "partially_received";
       order.updatedAt = timestamp;
       if (isComplete) order.receivedAt = timestamp;
@@ -995,6 +1218,7 @@ export class MasterDataRepository {
         lines,
         totalAmount: Math.round(lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0) * 100) / 100,
         receivableAmount: 0,
+        collectedAmount: 0,
         note: validated.note,
         shipments: [],
         createdAt: timestamp,
