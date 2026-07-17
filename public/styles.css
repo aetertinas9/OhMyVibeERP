@@ -962,6 +962,7 @@ button, input { font: inherit; }
 .inventory-transfer-create summary strong { color: #34443e; font-size: 13px; }
 .inventory-transfer-create summary em { color: #8c9792; font-size: 9px; font-style: normal; }
 .inventory-transfer-create[open] summary { border-bottom: 1px solid #e1e5df; }
+.inventory-count-create summary i { color: #fff; background: #8b6534; }
 .inventory-transfer-form { padding: 22px; }
 .inventory-transfer-form label { display: grid; gap: 7px; color: #40504a; font-size: 10px; font-weight: 600; }
 .inventory-transfer-form label b { color: #d7802d; }
@@ -969,6 +970,11 @@ button, input { font: inherit; }
 .inventory-transfer-form input:focus, .inventory-transfer-form select:focus { border-color: var(--green-light); box-shadow: 0 0 0 3px rgba(28,80,69,.1); }
 .inventory-transfer-form [aria-invalid="true"] { border-color: #bf6a53; background: #fffafa; }
 .transfer-form-header { display: grid; grid-template-columns: 1fr 34px 1fr .7fr; align-items: end; gap: 11px; margin-bottom: 17px; }
+.count-form-warning { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 11px 13px; border: 1px solid #e3cba9; border-radius: 7px; color: #765b36; background: #fff8eb; }
+.count-form-warning > span { display: grid; place-items: center; flex: 0 0 auto; width: 23px; height: 23px; border-radius: 50%; color: #fff; background: #a57435; font-size: 9px; font-weight: 800; }
+.count-form-warning p { margin: 0; font-size: 9px; line-height: 1.5; }
+.count-form-warning strong { margin-right: 4px; color: #69491f; }
+.count-form-header { display: grid; grid-template-columns: 1fr .7fr; gap: 11px; margin-bottom: 17px; }
 .transfer-direction { display: grid; place-items: center; height: 42px; color: #cc8030; font-size: 18px; }
 .transfer-lines { overflow: hidden; border: 1px solid #dfe2dc; border-radius: 8px; }
 .transfer-line { display: grid; grid-template-columns: 1.8fr .45fr; gap: 10px; padding: 8px 11px; border-top: 1px solid #e9eae5; }
@@ -1016,6 +1022,17 @@ button, input { font: inherit; }
 .stock-state.low { color: #a54b31; background: #fbe9e3; }
 .inventory-transfer-history { margin-top: 20px; }
 .inventory-transfer-history table { min-width: 920px; }
+.inventory-count-history { margin-top: 20px; }
+.inventory-count-history table { min-width: 1050px; }
+.count-line-details { display: grid; gap: 7px; min-width: 390px; }
+.count-line-details > div { display: grid; grid-template-columns: 1.35fr 1fr 1fr .65fr; align-items: center; gap: 12px; }
+.count-line-details strong { color: #3e514a; font-size: 9px; }
+.count-line-details strong small { display: block; margin-top: 2px; color: #9aa39f; font-size: 7px; font-weight: 400; }
+.count-line-details span { color: #7d8984; font-size: 8px; }
+.count-difference { font-size: 9px; text-align: right; }
+.count-difference.positive { color: #287449; }
+.count-difference.negative { color: #aa4932; }
+.count-difference.zero { color: #87918d; }
 .transfer-route { display: flex; align-items: center; gap: 8px; }
 .transfer-route b { color: #41564e; font-size: 9px; }
 .transfer-route i { color: #d3832e; font-style: normal; }
@@ -1035,7 +1052,7 @@ button, input { font: inherit; }
   .warehouse-grid { grid-template-columns: 1fr; }
   .warehouse-card { min-height: 150px; }
   .inventory-transfer-create summary { align-items: flex-start; flex-direction: column; justify-content: center; gap: 5px; }
-  .transfer-form-header, .transfer-line, .transfer-form-footer { grid-template-columns: 1fr; }
+  .transfer-form-header, .count-form-header, .transfer-line, .transfer-form-footer { grid-template-columns: 1fr; }
   .transfer-direction, .transfer-line-head { display: none; }
 }
 

@@ -544,15 +544,22 @@ export function inventoryPage({
   items,
   warehouses,
   transfers = [],
+  counts = [],
   values = {},
   fieldErrors = {},
   error = "",
+  countValues = {},
+  countFieldErrors = {},
+  countError = "",
   transferred = false,
+  counted = false,
 }) {
   const canTransfer = canAccess(user, PERMISSIONS.INVENTORY_TRANSFER);
+  const canCount = canAccess(user, PERMISSIONS.INVENTORY_COUNT);
   const itemMap = new Map(items.map((item) => [item.id, item]));
   const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
   const transferLines = Array.from({ length: 6 }, (_, index) => values.lines?.[index] ?? {});
+  const countLines = Array.from({ length: 6 }, (_, index) => countValues.lines?.[index] ?? {});
   const warehouseItemCounts = Object.fromEntries(warehouses.map(({ id }) => [
     id,
     items.filter((item) => Number(item.stockByWarehouse[id] || 0) > 0).length,
@@ -597,10 +604,30 @@ export function inventoryPage({
       <td>${escapeHtml(transfer.note || "이동 메모 없음")}</td>
     </tr>`;
   }).join("");
-  const notice = error
-    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+  const countRows = counts.map((count) => {
+    const warehouse = warehouseMap.get(count.warehouseId);
+    const lineDetails = count.lines.map((line) => {
+      const item = itemMap.get(line.itemId);
+      const unit = item?.unit ?? "";
+      const difference = Number(line.differenceQuantity || 0);
+      const signedDifference = `${difference > 0 ? "+" : ""}${formatQuantity(difference, unit)}`;
+      const differenceClass = difference > 0 ? "positive" : difference < 0 ? "negative" : "zero";
+      return `<div><strong>${escapeHtml(item?.name ?? "삭제된 품목")}<small>${escapeHtml(item?.code ?? line.itemId)}</small></strong><span>장부 ${escapeHtml(formatQuantity(line.bookQuantity, unit))}</span><span>실사 ${escapeHtml(formatQuantity(line.actualQuantity, unit))}</span><b class="count-difference ${differenceClass}">${escapeHtml(signedDifference)}</b></div>`;
+    }).join("");
+    return `<tr data-inventory-count="${escapeHtml(count.number)}">
+      <td><strong class="record-code">${escapeHtml(count.number)}</strong><small>${escapeHtml(formatKoreanDateTime(count.adjustedAt))}</small></td>
+      <td><strong>${escapeHtml(formatDate(count.countDate))}</strong><small>${escapeHtml(warehouse?.name ?? count.warehouseId)}</small></td>
+      <td class="count-line-details">${lineDetails}</td>
+      <td><strong>${escapeHtml(count.adjustedBy || "처리자 미상")}</strong><small>조정 처리자</small></td>
+      <td>${escapeHtml(count.note || "실사 메모 없음")}</td>
+    </tr>`;
+  }).join("");
+  const notice = error || countError
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error || countError)}</div>`
     : transferred
       ? `<div class="form-notice success" role="status">창고 이동을 완료해 출발·도착 재고를 함께 반영했습니다.</div>`
+      : counted
+        ? `<div class="form-notice success" role="status">재고 실사를 반영했습니다. 장부·실사·차이와 처리 이력을 함께 보관합니다.</div>`
       : "";
 
   return workspacePage({
@@ -638,6 +665,23 @@ export function inventoryPage({
         </form>
       </details>` : `<aside class="inventory-transfer-role-note"><span aria-hidden="true">i</span><p><strong>창고 이동 처리는 물류 부서 업무입니다.</strong> 현재고와 이동 이력은 조회할 수 있습니다.</p></aside>`}
 
+      ${canCount ? `<details class="inventory-transfer-create inventory-count-create"${countError ? " open" : ""}>
+        <summary><span><i>COUNT</i><strong>재고 실사·조정</strong></span><em>저장 전 장부 수량 고정 · 실사 수량으로 즉시 조정</em></summary>
+        <form action="/inventory/counts" method="post" class="inventory-transfer-form inventory-count-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <div class="count-form-warning"><span aria-hidden="true">!</span><p><strong>저장 즉시 선택 창고의 재고가 실사 수량으로 바뀝니다.</strong> 저장 직전 장부 수량과 차이, 처리자, 처리 시각은 수정할 수 없는 이력으로 남습니다.</p></div>
+          <div class="count-form-header">
+            <label>실사 창고 <b>*</b><select name="warehouseId" required${inputState("warehouseId", countFieldErrors)}><option value="">실사 창고 선택</option>${warehouseOptions(countValues.warehouseId)}</select>${fieldError("warehouseId", countFieldErrors)}</label>
+            <label>실사일 <b>*</b><input name="countDate" type="date" value="${escapeHtml(countValues.countDate)}" required${inputState("countDate", countFieldErrors)}>${fieldError("countDate", countFieldErrors)}</label>
+          </div>
+          ${countFieldErrors.lines ? `<div class="inline-error">${escapeHtml(countFieldErrors.lines)}</div>` : ""}
+          <div class="transfer-lines count-lines"><div class="transfer-line transfer-line-head"><span>실사 품목 · 현재 창고별 장부 재고</span><span>실사 수량</span></div>
+            ${countLines.map((line, index) => `<div class="transfer-line"><label><span class="sr-only">${index + 1}번 실사 품목</span><select name="countLineItemId"${inputState(`line${index}ItemId`, countFieldErrors)}><option value="">품목 선택</option>${itemOptions(line.itemId)}</select>${fieldError(`line${index}ItemId`, countFieldErrors)}</label><label><span class="sr-only">${index + 1}번 실사 수량</span><input name="countActualQuantity" type="number" value="${escapeHtml(line.actualQuantity)}" placeholder="0 포함 실제 수량" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState(`line${index}ActualQuantity`, countFieldErrors)}>${fieldError(`line${index}ActualQuantity`, countFieldErrors)}</label></div>`).join("")}
+          </div>
+          <div class="transfer-form-footer"><input name="note" value="${escapeHtml(countValues.note)}" placeholder="차이 사유·실사 메모 (선택)" maxlength="300"><button type="submit"${!items.length ? " disabled" : ""}>실사 반영 <span aria-hidden="true">→</span></button></div>
+        </form>
+      </details>` : ""}
+
       <div class="warehouse-grid">${warehouseCards}</div>
 
       <section class="inventory-table-card" aria-labelledby="inventory-list-title">
@@ -653,6 +697,11 @@ export function inventoryPage({
       <section class="inventory-table-card inventory-transfer-history" aria-labelledby="inventory-transfer-history-title">
         <div class="list-heading"><div><p>TRANSFER HISTORY</p><h2 id="inventory-transfer-history-title">창고 이동 이력</h2></div><strong>${transfers.length}<small>건 이동</small></strong></div>
         ${transferRows ? `<div class="table-scroll"><table><thead><tr><th>이동 번호·처리 시각</th><th>이동일</th><th>출발 → 도착</th><th>품목·수량</th><th>메모</th></tr></thead><tbody>${transferRows}</tbody></table></div>` : `<div class="inventory-transfer-empty"><span aria-hidden="true">⇄</span><strong>창고 이동 이력이 없습니다.</strong><p>물류 담당자가 이동을 처리하면 양쪽 재고와 근거가 여기에 함께 남습니다.</p></div>`}
+      </section>
+
+      <section class="inventory-table-card inventory-count-history" aria-labelledby="inventory-count-history-title">
+        <div class="list-heading"><div><p>COUNT &amp; ADJUSTMENT HISTORY</p><h2 id="inventory-count-history-title">재고 실사·조정 이력</h2></div><strong>${counts.length}<small>건 실사</small></strong></div>
+        ${countRows ? `<div class="table-scroll"><table><thead><tr><th>실사 번호·처리 시각</th><th>실사일·창고</th><th>품목별 장부 → 실사 · 차이</th><th>처리자</th><th>메모</th></tr></thead><tbody>${countRows}</tbody></table></div>` : `<div class="inventory-transfer-empty"><span aria-hidden="true">✓</span><strong>재고 실사 이력이 없습니다.</strong><p>실사 수량을 반영하면 조정 전 장부 수량과 차이, 처리자가 여기에 남습니다.</p></div>`}
       </section>
     </section>`,
   });
