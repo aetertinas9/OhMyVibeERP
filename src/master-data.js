@@ -137,6 +137,23 @@ function dateValue(value, field, label, errors, { required = false } = {}) {
   return date;
 }
 
+function monthBounds(value) {
+  const month = cleanText(value, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new InputValidationError({ month: "조회 월 형식이 올바르지 않습니다." });
+  }
+  const [year, monthNumber] = month.split("-").map(Number);
+  const nextYear = monthNumber === 12 ? year + 1 : year;
+  const nextMonth = monthNumber === 12 ? 1 : monthNumber + 1;
+  return {
+    month,
+    start: Date.parse(`${month}-01T00:00:00+09:00`),
+    end: Date.parse(`${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01T00:00:00+09:00`),
+  };
+}
+
+const roundMoney = (value) => Math.round(value * 100) / 100;
+
 function validatePartner(type, input) {
   if (!PARTNER_TYPES.has(type)) throw new Error("알 수 없는 거래처 유형입니다.");
   const errors = {};
@@ -397,6 +414,81 @@ export class MasterDataRepository {
   async listProductionOrders() {
     const data = await this.data();
     return copy(data.productionOrders);
+  }
+
+  async monthlyTradeSummary(monthInput) {
+    const { month, start, end } = monthBounds(monthInput);
+    const data = await this.data();
+    const inMonth = (timestamp) => {
+      const occurredAt = Date.parse(timestamp);
+      return Number.isFinite(occurredAt) && occurredAt >= start && occurredAt < end;
+    };
+
+    const purchases = data.purchaseOrders.flatMap((order) => order.receipts
+      .filter((receipt) => inMonth(receipt.receivedAt))
+      .map((receipt) => {
+        const lines = receipt.lines.map((receiptLine) => {
+          const orderLine = order.lines.find(({ id }) => id === receiptLine.lineId);
+          if (!orderLine) throw new BusinessRuleError("입고 이력의 발주 행을 찾을 수 없습니다.");
+          const amount = roundMoney(receiptLine.quantity * orderLine.unitPrice);
+          return {
+            itemId: orderLine.itemId,
+            quantity: receiptLine.quantity,
+            unitPrice: orderLine.unitPrice,
+            amount,
+          };
+        });
+        return {
+          id: receipt.id,
+          type: "purchase",
+          occurredAt: receipt.receivedAt,
+          documentNumber: order.number,
+          partnerId: order.supplierId,
+          warehouseId: order.warehouseId,
+          lines,
+          amount: roundMoney(lines.reduce((total, line) => total + line.amount, 0)),
+        };
+      }));
+
+    const sales = data.salesOrders.flatMap((order) => order.shipments
+      .filter((shipment) => inMonth(shipment.shippedAt))
+      .map((shipment) => {
+        const lines = shipment.lines.map((shipmentLine) => {
+          const orderLine = order.lines.find(({ id }) => id === shipmentLine.lineId);
+          if (!orderLine) throw new BusinessRuleError("출고 이력의 주문 행을 찾을 수 없습니다.");
+          const amount = roundMoney(shipmentLine.quantity * orderLine.unitPrice);
+          return {
+            itemId: orderLine.itemId,
+            quantity: shipmentLine.quantity,
+            unitPrice: orderLine.unitPrice,
+            amount,
+          };
+        });
+        return {
+          id: shipment.id,
+          type: "sale",
+          occurredAt: shipment.shippedAt,
+          documentNumber: order.number,
+          partnerId: order.customerId,
+          warehouseId: order.warehouseId,
+          lines,
+          amount: roundMoney(lines.reduce((total, line) => total + line.amount, 0)),
+        };
+      }));
+
+    const purchaseAmount = roundMoney(purchases.reduce((total, transaction) => total + transaction.amount, 0));
+    const salesAmount = roundMoney(sales.reduce((total, transaction) => total + transaction.amount, 0));
+    return copy({
+      month,
+      purchaseAmount,
+      salesAmount,
+      differenceAmount: roundMoney(salesAmount - purchaseAmount),
+      purchaseCount: purchases.length,
+      salesCount: sales.length,
+      transactions: [...purchases, ...sales].sort((left, right) => (
+        right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
+      )),
+    });
   }
 
   async createPartner(type, input, actorId) {
