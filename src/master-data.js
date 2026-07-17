@@ -3,11 +3,15 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createSyntheticEmployees } from "./employee-seed.js";
+
 const DEFAULT_DATA_FILE = fileURLToPath(new URL("../data/master-data.json", import.meta.url));
 const PARTNER_TYPES = new Set(["sales", "purchases"]);
 const TAX_TYPES = new Set(["taxable", "zero-rated", "exempt"]);
 const MAX_MONEY = 999_999_999_999;
 const MAX_QUANTITY = 999_999_999;
+const EMPLOYMENT_TYPES = new Set(["regular", "contract", "part-time"]);
+const WORK_LOCATIONS = new Set(["서울", "인천", "부산"]);
 
 export const WAREHOUSES = Object.freeze([
   Object.freeze({ id: "seoul", code: "WH-SEO", name: "서울 창고", location: "서울" }),
@@ -23,6 +27,8 @@ const emptyData = () => ({
   salesOrders: [],
   billsOfMaterials: [],
   productionOrders: [],
+  employees: createSyntheticEmployees(),
+  payrollRuns: [],
 });
 const copy = (value) => structuredClone(value);
 const totalWarehouseStock = (stockByWarehouse) => (
@@ -330,6 +336,55 @@ function validateProductionOrderInput(input) {
   };
 }
 
+function validateEmployeeInput(input) {
+  const errors = {};
+  const employeeNumber = cleanText(input.employeeNumber, 20).toUpperCase();
+  if (!employeeNumber) {
+    errors.employeeNumber = "직원번호를 입력해 주세요.";
+  } else if (!/^[A-Z0-9][A-Z0-9_-]{1,19}$/.test(employeeNumber)) {
+    errors.employeeNumber = "직원번호는 영문·숫자·하이픈·밑줄 2~20자로 입력해 주세요.";
+  }
+  const email = optionalEmail(input.email, errors);
+  if (!email && !errors.email) errors.email = "이메일을 입력해 주세요.";
+  const employmentType = cleanText(input.employmentType, 20) || "regular";
+  if (!EMPLOYMENT_TYPES.has(employmentType)) errors.employmentType = "고용 형태를 선택해 주세요.";
+  const workLocation = requiredText(input.workLocation, "workLocation", "근무지", 20, errors);
+  if (workLocation && !WORK_LOCATIONS.has(workLocation)) errors.workLocation = "근무지를 선택해 주세요.";
+  const baseSalary = numericValue(input.baseSalary, {
+    field: "baseSalary", label: "월 기본급", maximum: MAX_MONEY,
+  }, errors);
+  if (!errors.baseSalary && baseSalary <= 0) errors.baseSalary = "월 기본급은 0보다 커야 합니다.";
+  const mealAllowance = numericValue(input.mealAllowance, {
+    field: "mealAllowance", label: "식대", maximum: MAX_MONEY,
+  }, errors);
+  const otherAllowance = numericValue(input.otherAllowance, {
+    field: "otherAllowance", label: "기타 수당", maximum: MAX_MONEY,
+  }, errors);
+  const fixedDeduction = numericValue(input.fixedDeduction, {
+    field: "fixedDeduction", label: "등록 공제액", maximum: MAX_MONEY,
+  }, errors);
+  if (!errors.fixedDeduction && fixedDeduction > baseSalary + mealAllowance + otherAllowance) {
+    errors.fixedDeduction = "등록 공제액은 지급 합계를 초과할 수 없습니다.";
+  }
+  const employee = {
+    employeeNumber,
+    name: requiredText(input.name, "name", "이름", 60, errors),
+    department: requiredText(input.department, "department", "부서", 60, errors),
+    position: requiredText(input.position, "position", "직급", 40, errors),
+    workLocation,
+    hireDate: dateValue(input.hireDate, "hireDate", "입사일", errors, { required: true }),
+    email,
+    employmentType,
+    baseSalary,
+    mealAllowance,
+    otherAllowance,
+    fixedDeduction,
+    note: cleanText(input.note, 500),
+  };
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return employee;
+}
+
 function validateStoredData(value) {
   if (
     !value
@@ -340,6 +395,8 @@ function validateStoredData(value) {
     || (value.salesOrders !== undefined && !Array.isArray(value.salesOrders))
     || (value.billsOfMaterials !== undefined && !Array.isArray(value.billsOfMaterials))
     || (value.productionOrders !== undefined && !Array.isArray(value.productionOrders))
+    || (value.employees !== undefined && !Array.isArray(value.employees))
+    || (value.payrollRuns !== undefined && !Array.isArray(value.payrollRuns))
   ) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
@@ -349,6 +406,8 @@ function validateStoredData(value) {
     salesOrders: value.salesOrders ?? [],
     billsOfMaterials: value.billsOfMaterials ?? [],
     productionOrders: value.productionOrders ?? [],
+    employees: value.employees ?? createSyntheticEmployees(),
+    payrollRuns: value.payrollRuns ?? [],
   };
 }
 
@@ -414,6 +473,11 @@ export class MasterDataRepository {
   async listProductionOrders() {
     const data = await this.data();
     return copy(data.productionOrders);
+  }
+
+  async listEmployees() {
+    const data = await this.data();
+    return copy([...data.employees].sort((left, right) => left.employeeNumber.localeCompare(right.employeeNumber)));
   }
 
   async monthlyTradeSummary(monthInput) {
@@ -528,6 +592,28 @@ export class MasterDataRepository {
         createdBy: actorId,
       };
       data.items.unshift(record);
+      return record;
+    });
+  }
+
+  async createEmployee(input, actorId) {
+    const validated = validateEmployeeInput(input);
+    return this.mutate((data) => {
+      if (data.employees.some(({ employeeNumber }) => employeeNumber === validated.employeeNumber)) {
+        throw new DuplicateRecordError("이미 등록된 직원번호입니다.");
+      }
+      if (data.employees.some(({ email }) => email === validated.email)) {
+        throw new DuplicateRecordError("이미 등록된 직원 이메일입니다.");
+      }
+      const record = {
+        id: `employee_${this.createId()}`,
+        ...validated,
+        employmentStatus: "active",
+        isSynthetic: false,
+        createdAt: this.now().toISOString(),
+        createdBy: actorId,
+      };
+      data.employees.push(record);
       return record;
     });
   }
