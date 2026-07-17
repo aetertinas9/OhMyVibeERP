@@ -29,6 +29,7 @@ const emptyData = () => ({
   productionOrders: [],
   employees: createSyntheticEmployees(),
   payrollRuns: [],
+  periodClosures: [],
 });
 const copy = (value) => structuredClone(value);
 const totalWarehouseStock = (stockByWarehouse) => (
@@ -156,6 +157,30 @@ function monthBounds(value) {
     start: Date.parse(`${month}-01T00:00:00+09:00`),
     end: Date.parse(`${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01T00:00:00+09:00`),
   };
+}
+
+function koreanMonth(date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+  }).format(date);
+}
+
+function closedThrough(data) {
+  return data.periodClosures.reduce((latest, closure) => (
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(closure?.month) && closure.month > latest ? closure.month : latest
+  ), "");
+}
+
+function assertOpenPeriod(data, dateOrMonth) {
+  const period = String(dateOrMonth ?? "").slice(0, 7);
+  const closedMonth = closedThrough(data);
+  if (closedMonth && period <= closedMonth) {
+    throw new BusinessRuleError(
+      `${period} 회계기간은 마감되었습니다. ${closedMonth}까지의 자료는 새로 등록하거나 변경할 수 없습니다.`,
+    );
+  }
 }
 
 const roundMoney = (value) => Math.round(value * 100) / 100;
@@ -413,6 +438,7 @@ function validateStoredData(value) {
     || (value.productionOrders !== undefined && !Array.isArray(value.productionOrders))
     || (value.employees !== undefined && !Array.isArray(value.employees))
     || (value.payrollRuns !== undefined && !Array.isArray(value.payrollRuns))
+    || (value.periodClosures !== undefined && !Array.isArray(value.periodClosures))
   ) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
@@ -424,6 +450,7 @@ function validateStoredData(value) {
     productionOrders: value.productionOrders ?? [],
     employees: value.employees ?? createSyntheticEmployees(),
     payrollRuns: value.payrollRuns ?? [],
+    periodClosures: value.periodClosures ?? [],
   };
 }
 
@@ -506,6 +533,38 @@ export class MasterDataRepository {
     const run = data.payrollRuns.find(({ id }) => id === runId);
     if (!run) throw new RecordNotFoundError("급여대장을 찾을 수 없습니다.");
     return copy(run);
+  }
+
+  async accountingPeriodStatus() {
+    const data = await this.data();
+    return copy({
+      closedThrough: closedThrough(data),
+      closures: [...data.periodClosures].sort((left, right) => (
+        right.month.localeCompare(left.month) || right.closedAt.localeCompare(left.closedAt)
+      )),
+    });
+  }
+
+  async closeAccountingPeriod(monthInput, actorId) {
+    const { month } = monthBounds(monthInput);
+    return this.mutate((data) => {
+      const currentMonth = koreanMonth(this.now());
+      if (month >= currentMonth) {
+        throw new BusinessRuleError("현재 월과 미래 월은 마감할 수 없습니다. 월이 끝난 뒤 마감해 주세요.");
+      }
+      const latestClosedMonth = closedThrough(data);
+      if (latestClosedMonth && month <= latestClosedMonth) {
+        throw new DuplicateRecordError(`${latestClosedMonth}까지 이미 마감되었습니다.`);
+      }
+      const record = {
+        id: `period_close_${this.createId()}`,
+        month,
+        closedAt: this.now().toISOString(),
+        closedBy: cleanText(actorId, 120),
+      };
+      data.periodClosures.unshift(record);
+      return { ...record, closedThrough: month };
+    });
   }
 
   async executiveDashboard(monthInput) {
@@ -723,6 +782,7 @@ export class MasterDataRepository {
   async createPayrollRun(input, actorId) {
     const validated = validatePayrollRunInput(input);
     return this.mutate((data) => {
+      assertOpenPeriod(data, validated.payPeriod);
       if (data.payrollRuns.some(({ payPeriod }) => payPeriod === validated.payPeriod)) {
         throw new DuplicateRecordError("이미 확정된 급여 귀속월입니다.");
       }
@@ -788,6 +848,7 @@ export class MasterDataRepository {
   async createPurchaseOrder(input, actorId) {
     const validated = validatePurchaseOrderInput(input);
     return this.mutate((data) => {
+      assertOpenPeriod(data, validated.orderDate);
       const supplier = data.partners.find((partner) => (
         partner.id === validated.supplierId && partner.type === "purchases"
       ));
@@ -896,6 +957,7 @@ export class MasterDataRepository {
   async createSalesOrder(input, actorId) {
     const validated = validateSalesOrderInput(input);
     return this.mutate((data) => {
+      assertOpenPeriod(data, validated.orderDate);
       const customer = data.partners.find((partner) => (
         partner.id === validated.customerId && partner.type === "sales"
       ));
@@ -1051,6 +1113,7 @@ export class MasterDataRepository {
   async createProductionOrder(input, actorId) {
     const validated = validateProductionOrderInput(input);
     return this.mutate((data) => {
+      assertOpenPeriod(data, validated.productionDate);
       const product = data.items.find(({ id }) => id === validated.productItemId);
       if (!product) throw new InputValidationError({ productItemId: "등록된 완제품을 선택해 주세요." });
       const bill = data.billsOfMaterials.find(({ productItemId }) => productItemId === product.id);
