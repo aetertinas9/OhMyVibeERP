@@ -108,6 +108,7 @@ const navigation = ({ active }) => `
     <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
     <a class="${active === "items" ? "active" : ""}" href="/items"><span aria-hidden="true">◇</span> 품목</a>
     <p class="nav-section">업무 관리</p>
+    <a class="${active === "sales-orders" ? "active" : ""}" href="/sales-orders"><span aria-hidden="true">↗</span> 주문 · 출고</a>
     <a class="${active === "purchase-orders" ? "active" : ""}" href="/purchase-orders"><span aria-hidden="true">▦</span> 발주 관리</a>
     <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
@@ -630,6 +631,137 @@ export function purchaseOrdersPage({
       </details>
 
       <section class="orders-section"><div class="orders-title"><p>ORDER HISTORY</p><h2>발주·입고 현황</h2></div>${orderCards}</section>
+    </section>`,
+  });
+}
+
+const salesOrderStatus = {
+  ordered: { label: "주문 접수", className: "ordered" },
+  partially_shipped: { label: "일부 출고", className: "partial" },
+  shipped: { label: "출고 완료", className: "shipped" },
+};
+
+export function salesOrdersPage({
+  user,
+  csrfToken,
+  customers,
+  items,
+  warehouses,
+  orders,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+  shipped = false,
+  shipmentOrderId = "",
+}) {
+  const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const lines = Array.from({ length: 5 }, (_, index) => values.lines?.[index] ?? {});
+  const prerequisitesReady = customers.length > 0 && items.length > 0;
+  const totalReceivable = Math.round(orders.reduce((total, order) => total + Number(order.receivableAmount || 0), 0) * 100) / 100;
+
+  const customerOptions = customers.map((customer) => (
+    `<option value="${escapeHtml(customer.id)}"${values.customerId === customer.id ? " selected" : ""}>${escapeHtml(customer.code)} · ${escapeHtml(customer.name)}</option>`
+  )).join("");
+  const itemOptions = (selectedId) => items.map((item) => (
+    `<option value="${escapeHtml(item.id)}"${selectedId === item.id ? " selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)} (${escapeHtml(item.unit)}, 판매 ${escapeHtml(formatMoney(item.salesPrice))})</option>`
+  )).join("");
+
+  const orderCards = orders.length
+    ? orders.map((order) => {
+      const customer = customerMap.get(order.customerId);
+      const warehouse = warehouseMap.get(order.warehouseId);
+      const status = salesOrderStatus[order.status] ?? salesOrderStatus.ordered;
+      const shipmentErrors = shipmentOrderId === order.id ? fieldErrors : {};
+      const orderLines = order.lines.map((line) => {
+        const item = itemMap.get(line.itemId);
+        const remaining = Math.round((line.quantity - line.shippedQuantity) * 100) / 100;
+        return `<tr>
+          <td><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><small>${escapeHtml(item?.code ?? line.itemId)} · ${escapeHtml(item?.unit ?? "")}</small></td>
+          <td>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</td>
+          <td><strong class="shipped-quantity">${escapeHtml(formatQuantity(line.shippedQuantity, item?.unit ?? ""))}</strong></td>
+          <td>${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))}</td>
+          <td class="number-cell">${escapeHtml(formatMoney(line.unitPrice))}</td>
+          <td class="number-cell">${escapeHtml(formatMoney(line.quantity * line.unitPrice))}</td>
+        </tr>`;
+      }).join("");
+      const shipmentFields = order.status !== "shipped"
+        ? `<form action="/sales-orders/${escapeHtml(order.id)}/ship" method="post" class="receipt-form shipment-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="receipt-heading"><div><span>SHIPMENT</span><h3>출고 처리</h3></div><p>실제로 내보낼 수량을 입력하세요. 저장 즉시 ${escapeHtml(warehouse?.name ?? "출고 창고")} 재고가 줄고 받을 금액이 늘어납니다.</p></div>
+            ${shipmentErrors.shipment ? `<div class="inline-error">${escapeHtml(shipmentErrors.shipment)}</div>` : ""}
+            <div class="receipt-inputs">
+              ${order.lines.map((line) => {
+                const item = itemMap.get(line.itemId);
+                const remaining = Math.round((line.quantity - line.shippedQuantity) * 100) / 100;
+                const field = `shipment_${line.id}`;
+                if (remaining <= 0) return "";
+                const available = Number(item?.stockByWarehouse?.[order.warehouseId] || 0);
+                return `<label><span>${escapeHtml(item?.name ?? "품목")} <small>미출고 ${escapeHtml(formatQuantity(remaining, item?.unit ?? ""))} · 재고 ${escapeHtml(formatQuantity(available, item?.unit ?? ""))}</small></span>
+                  <input name="${escapeHtml(field)}" type="number" placeholder="0" min="0" max="${escapeHtml(Math.min(remaining, available))}" step="0.01" inputmode="decimal"${inputState(field, shipmentErrors)}>
+                  ${fieldError(field, shipmentErrors)}
+                </label>`;
+              }).join("")}
+            </div>
+            <div class="receipt-actions"><input name="shipmentNote" placeholder="출고 메모 (선택)" maxlength="300"><button type="submit">출고 반영 <span aria-hidden="true">→</span></button></div>
+          </form>`
+        : `<div class="receipt-complete shipment-complete"><span aria-hidden="true">✓</span><div><strong>모든 품목의 출고가 완료됐습니다.</strong><p>${escapeHtml(formatDate(order.shippedAt))} · 받을 금액 ${escapeHtml(formatMoney(order.receivableAmount))}</p></div></div>`;
+
+      return `<article class="purchase-order-card sales-order-card">
+        <header>
+          <div><span class="order-number">${escapeHtml(order.number)}</span><h2>${escapeHtml(customer?.name ?? "알 수 없는 판매처")}</h2><p>${escapeHtml(customer?.code ?? "")} · ${escapeHtml(warehouse?.name ?? order.warehouseId)} 출고</p></div>
+          <div class="order-meta"><span class="order-status ${status.className}">${status.label}</span><dl><div><dt>주문일</dt><dd>${escapeHtml(formatDate(order.orderDate))}</dd></div><div><dt>출고 요청</dt><dd>${escapeHtml(order.requestedShipDate ? formatDate(order.requestedShipDate) : "미정")}</dd></div></dl></div>
+        </header>
+        <div class="table-scroll"><table class="order-lines-table"><thead><tr><th>품목</th><th>주문</th><th>출고</th><th>미출고</th><th>판매 단가</th><th>금액</th></tr></thead><tbody>${orderLines}</tbody></table></div>
+        <div class="order-total sales-order-total"><span>${escapeHtml(order.note || "메모 없음")}</span><div><p>주문금액 <strong>${escapeHtml(formatMoney(order.totalAmount))}</strong></p><p class="receivable-amount">받을 금액 <strong>${escapeHtml(formatMoney(order.receivableAmount))}</strong></p></div></div>
+        ${shipmentFields}
+      </article>`;
+    }).join("")
+    : `<div class="order-empty"><span aria-hidden="true">↗</span><h2>접수된 판매 주문이 없습니다.</h2><p>판매처와 출고 창고를 선택해 첫 주문을 등록해 보세요.</p></div>`;
+
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">판매 주문 등록을 완료했습니다.</div>`
+      : shipped
+        ? `<div class="form-notice success" role="status">출고 수량을 재고와 받을 금액에 반영했습니다.</div>`
+        : "";
+
+  return workspacePage({
+    title: "주문·출고",
+    active: "sales-orders",
+    user,
+    csrfToken,
+    content: `<section class="purchase-content sales-content">
+      <header class="purchase-heading sales-heading"><div><p class="form-kicker">SALES ORDER</p><h1>주문 · 출고</h1><p>판매 주문을 접수하고 출고 재고와 받을 금액을 함께 관리합니다.</p></div><div class="sales-summary"><span>누적 받을 금액</span><strong>${escapeHtml(formatMoney(totalReceivable))}</strong></div></header>
+      ${notice}
+      ${!prerequisitesReady ? `<div class="prerequisite-notice"><strong>주문 전에 기준정보가 필요합니다.</strong><p>${!customers.length ? "판매처" : ""}${!customers.length && !items.length ? "와 " : ""}${!items.length ? "품목" : ""}을 먼저 등록해 주세요.</p></div>` : ""}
+
+      <details class="purchase-create sales-create"${!orders.length || error && !shipmentOrderId ? " open" : ""}>
+        <summary><span><i>NEW</i><strong>새 판매 주문 등록</strong></span><em>판매처·출고 창고·품목 선택</em></summary>
+        <form action="/sales-orders" method="post" class="purchase-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <div class="purchase-form-header">
+            <label>판매처 <b>*</b><select name="customerId" required${inputState("customerId", fieldErrors)}><option value="">판매처 선택</option>${customerOptions}</select>${fieldError("customerId", fieldErrors)}</label>
+            <label>출고 창고 <b>*</b><select name="warehouseId" required${inputState("warehouseId", fieldErrors)}><option value="">창고 선택</option>${warehouses.map((warehouse) => `<option value="${escapeHtml(warehouse.id)}"${values.warehouseId === warehouse.id ? " selected" : ""}>${escapeHtml(warehouse.name)}</option>`).join("")}</select>${fieldError("warehouseId", fieldErrors)}</label>
+            <label>주문일 <b>*</b><input name="orderDate" type="date" value="${escapeHtml(values.orderDate)}" required${inputState("orderDate", fieldErrors)}>${fieldError("orderDate", fieldErrors)}</label>
+            <label>출고 요청일<input name="requestedShipDate" type="date" value="${escapeHtml(values.requestedShipDate)}"${inputState("requestedShipDate", fieldErrors)}>${fieldError("requestedShipDate", fieldErrors)}</label>
+          </div>
+          ${fieldErrors.lines ? `<div class="inline-error">${escapeHtml(fieldErrors.lines)}</div>` : ""}
+          <div class="po-lines"><div class="po-line po-line-head"><span>품목</span><span>수량</span><span>판매 단가</span></div>
+            ${lines.map((line, index) => `<div class="po-line">
+              <label><span class="sr-only">${index + 1}번 품목</span><select name="lineItemId"${inputState(`line${index}ItemId`, fieldErrors)}><option value="">품목 선택</option>${itemOptions(line.itemId)}</select>${fieldError(`line${index}ItemId`, fieldErrors)}</label>
+              <label><span class="sr-only">${index + 1}번 수량</span><input name="lineQuantity" type="number" value="${escapeHtml(line.quantity)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState(`line${index}Quantity`, fieldErrors)}>${fieldError(`line${index}Quantity`, fieldErrors)}</label>
+              <label><span class="money-input"><input name="lineUnitPrice" type="number" value="${escapeHtml(line.unitPrice)}" placeholder="0" min="0" max="999999999999" step="1" inputmode="numeric"${inputState(`line${index}UnitPrice`, fieldErrors)}><i>원</i></span>${fieldError(`line${index}UnitPrice`, fieldErrors)}</label>
+            </div>`).join("")}
+          </div>
+          <div class="purchase-form-footer"><input name="note" value="${escapeHtml(values.note)}" placeholder="주문 메모 (선택)" maxlength="500"><button type="submit"${!prerequisitesReady ? " disabled" : ""}>주문 등록 <span aria-hidden="true">→</span></button></div>
+        </form>
+      </details>
+
+      <section class="orders-section"><div class="orders-title"><p>ORDER & SHIPMENT</p><h2>주문·출고 현황</h2></div>${orderCards}</section>
     </section>`,
   });
 }
