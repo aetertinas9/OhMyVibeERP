@@ -15,7 +15,15 @@ export const WAREHOUSES = Object.freeze([
   Object.freeze({ id: "busan", code: "WH-BUS", name: "부산 창고", location: "부산" }),
 ]);
 
-const emptyData = () => ({ version: 1, partners: [], items: [], purchaseOrders: [], salesOrders: [] });
+const emptyData = () => ({
+  version: 1,
+  partners: [],
+  items: [],
+  purchaseOrders: [],
+  salesOrders: [],
+  billsOfMaterials: [],
+  productionOrders: [],
+});
 const copy = (value) => structuredClone(value);
 const totalWarehouseStock = (stockByWarehouse) => (
   Math.round(Object.values(stockByWarehouse).reduce((total, quantity) => total + quantity, 0) * 100) / 100
@@ -103,6 +111,14 @@ function numericValue(value, { field, label, maximum, decimals = 0 }, errors) {
 function positiveQuantity(value, field, label, errors) {
   const quantity = numericValue(value, {
     field, label, maximum: MAX_QUANTITY, decimals: 2,
+  }, errors);
+  if (!errors[field] && quantity <= 0) errors[field] = `${label}은(는) 0보다 커야 합니다.`;
+  return quantity;
+}
+
+function positiveInteger(value, field, label, errors) {
+  const quantity = numericValue(value, {
+    field, label, maximum: MAX_QUANTITY,
   }, errors);
   if (!errors[field] && quantity <= 0) errors[field] = `${label}은(는) 0보다 커야 합니다.`;
   return quantity;
@@ -260,6 +276,43 @@ function validateSalesOrderInput(input) {
   };
 }
 
+function validateBillOfMaterialsInput(input) {
+  const errors = {};
+  const productItemId = requiredText(input.productItemId, "productItemId", "완제품", 120, errors);
+  const submittedComponents = (Array.isArray(input.components) ? input.components : []).filter((component) => (
+    cleanText(component?.itemId, 120) || String(component?.quantity ?? "").trim()
+  ));
+  if (!submittedComponents.length) errors.components = "부품을 하나 이상 입력해 주세요.";
+  if (submittedComponents.length > 20) errors.components = "부품은 최대 20개까지 입력할 수 있습니다.";
+
+  const components = submittedComponents.slice(0, 20).map((component, index) => ({
+    itemId: requiredText(component.itemId, `component${index}ItemId`, "부품", 120, errors),
+    quantity: positiveQuantity(component.quantity, `component${index}Quantity`, "제품 1개당 필요 수량", errors),
+  }));
+
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return { productItemId, components, note: cleanText(input.note, 500) };
+}
+
+function validateProductionOrderInput(input) {
+  const errors = {};
+  const productItemId = requiredText(input.productItemId, "productItemId", "완제품", 120, errors);
+  const warehouseId = requiredText(input.warehouseId, "warehouseId", "생산 창고", 30, errors);
+  if (warehouseId && !WAREHOUSES.some(({ id }) => id === warehouseId)) {
+    errors.warehouseId = "생산 창고를 선택해 주세요.";
+  }
+  const productionDate = dateValue(input.productionDate, "productionDate", "생산일", errors, { required: true });
+  const quantity = positiveInteger(input.quantity, "quantity", "생산 수량", errors);
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return {
+    productItemId,
+    warehouseId,
+    productionDate,
+    quantity,
+    note: cleanText(input.note, 500),
+  };
+}
+
 function validateStoredData(value) {
   if (
     !value
@@ -268,6 +321,8 @@ function validateStoredData(value) {
     || !Array.isArray(value.items)
     || (value.purchaseOrders !== undefined && !Array.isArray(value.purchaseOrders))
     || (value.salesOrders !== undefined && !Array.isArray(value.salesOrders))
+    || (value.billsOfMaterials !== undefined && !Array.isArray(value.billsOfMaterials))
+    || (value.productionOrders !== undefined && !Array.isArray(value.productionOrders))
   ) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
@@ -275,6 +330,8 @@ function validateStoredData(value) {
     ...value,
     purchaseOrders: value.purchaseOrders ?? [],
     salesOrders: value.salesOrders ?? [],
+    billsOfMaterials: value.billsOfMaterials ?? [],
+    productionOrders: value.productionOrders ?? [],
   };
 }
 
@@ -330,6 +387,16 @@ export class MasterDataRepository {
   async listSalesOrders() {
     const data = await this.data();
     return copy(data.salesOrders);
+  }
+
+  async listBillsOfMaterials() {
+    const data = await this.data();
+    return copy(data.billsOfMaterials);
+  }
+
+  async listProductionOrders() {
+    const data = await this.data();
+    return copy(data.productionOrders);
   }
 
   async createPartner(type, input, actorId) {
@@ -596,6 +663,105 @@ export class MasterDataRepository {
         lines: shipmentLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
       });
       return order;
+    });
+  }
+
+  async createBillOfMaterials(input, actorId) {
+    const validated = validateBillOfMaterialsInput(input);
+    return this.mutate((data) => {
+      const product = data.items.find(({ id }) => id === validated.productItemId);
+      if (!product) throw new InputValidationError({ productItemId: "등록된 완제품을 선택해 주세요." });
+      if (data.billsOfMaterials.some(({ productItemId }) => productItemId === product.id)) {
+        throw new DuplicateRecordError("이미 부품 구성표가 등록된 완제품입니다.");
+      }
+
+      const seenItemIds = new Set();
+      const components = validated.components.map((component, index) => {
+        const item = data.items.find(({ id }) => id === component.itemId);
+        if (!item) throw new InputValidationError({ [`component${index}ItemId`]: "등록된 부품을 선택해 주세요." });
+        if (item.id === product.id) {
+          throw new InputValidationError({ [`component${index}ItemId`]: "완제품 자체를 부품으로 등록할 수 없습니다." });
+        }
+        if (seenItemIds.has(item.id)) {
+          throw new InputValidationError({ [`component${index}ItemId`]: "같은 부품은 구성표에 한 번만 추가할 수 있습니다." });
+        }
+        seenItemIds.add(item.id);
+        return { itemId: item.id, quantity: component.quantity };
+      });
+
+      const timestamp = this.now().toISOString();
+      const record = {
+        id: `bom_${this.createId()}`,
+        productItemId: product.id,
+        components,
+        note: validated.note,
+        createdAt: timestamp,
+        createdBy: actorId,
+      };
+      data.billsOfMaterials.unshift(record);
+      return record;
+    });
+  }
+
+  async createProductionOrder(input, actorId) {
+    const validated = validateProductionOrderInput(input);
+    return this.mutate((data) => {
+      const product = data.items.find(({ id }) => id === validated.productItemId);
+      if (!product) throw new InputValidationError({ productItemId: "등록된 완제품을 선택해 주세요." });
+      const bill = data.billsOfMaterials.find(({ productItemId }) => productItemId === product.id);
+      if (!bill) throw new InputValidationError({ productItemId: "부품 구성표가 등록된 완제품을 선택해 주세요." });
+
+      const consumption = bill.components.map((component) => {
+        const item = data.items.find(({ id }) => id === component.itemId);
+        if (!item) throw new BusinessRuleError("구성표의 부품이 삭제되어 생산할 수 없습니다.");
+        const normalized = itemWithWarehouseStock(item);
+        const requiredQuantity = Math.round(component.quantity * validated.quantity * 100) / 100;
+        const availableQuantity = normalized.stockByWarehouse[validated.warehouseId];
+        if (requiredQuantity > availableQuantity) {
+          throw new BusinessRuleError(
+            `${item.name} 재고가 부족합니다. 필요 ${requiredQuantity.toLocaleString("ko-KR")} ${item.unit}, 현재 ${availableQuantity.toLocaleString("ko-KR")} ${item.unit}`,
+          );
+        }
+        return { item, normalized, quantityPerProduct: component.quantity, requiredQuantity };
+      });
+
+      for (const component of consumption) {
+        component.normalized.stockByWarehouse[validated.warehouseId] = Math.round((
+          component.normalized.stockByWarehouse[validated.warehouseId] - component.requiredQuantity
+        ) * 100) / 100;
+        component.item.stockByWarehouse = component.normalized.stockByWarehouse;
+        component.item.openingStock = totalWarehouseStock(component.normalized.stockByWarehouse);
+      }
+      const normalizedProduct = itemWithWarehouseStock(product);
+      normalizedProduct.stockByWarehouse[validated.warehouseId] = Math.round((
+        normalizedProduct.stockByWarehouse[validated.warehouseId] + validated.quantity
+      ) * 100) / 100;
+      product.stockByWarehouse = normalizedProduct.stockByWarehouse;
+      product.openingStock = totalWarehouseStock(normalizedProduct.stockByWarehouse);
+
+      const dateKey = validated.productionDate.replaceAll("-", "");
+      const prefix = `MO-${dateKey}-`;
+      const sequence = data.productionOrders.filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const timestamp = this.now().toISOString();
+      const record = {
+        id: `production_order_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        productItemId: product.id,
+        warehouseId: validated.warehouseId,
+        productionDate: validated.productionDate,
+        quantity: validated.quantity,
+        status: "completed",
+        components: consumption.map(({ item, quantityPerProduct, requiredQuantity }) => ({
+          itemId: item.id,
+          quantityPerProduct,
+          consumedQuantity: requiredQuantity,
+        })),
+        note: validated.note,
+        completedAt: timestamp,
+        completedBy: actorId,
+      };
+      data.productionOrders.unshift(record);
+      return record;
     });
   }
 
