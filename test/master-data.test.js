@@ -9,6 +9,7 @@ import {
   DuplicateRecordError,
   InputValidationError,
   MasterDataRepository,
+  WAREHOUSES,
 } from "../src/master-data.js";
 
 const fixedDate = new Date("2026-07-17T00:00:00.000Z");
@@ -84,7 +85,45 @@ test("품목의 단가·재고·과세 유형을 정규화해 등록한다", asy
   assert.equal(item.code, "ITEM-001");
   assert.equal(item.purchasePrice, 12_000);
   assert.equal(item.openingStock, 10.25);
+  assert.deepEqual(item.stockByWarehouse, { seoul: 10.25, incheon: 0, busan: 0 });
   assert.equal((await repository.listItems()).length, 1);
+});
+
+test("서울·인천·부산 창고별 재고와 총수량을 품목에 저장한다", async () => {
+  const repository = memoryRepository();
+  assert.deepEqual(WAREHOUSES.map(({ location }) => location), ["서울", "인천", "부산"]);
+
+  const item = await repository.createItem({
+    code: "I-003",
+    name: "창고 분산 품목",
+    unit: "EA",
+    seoulStock: "12.5",
+    incheonStock: "20",
+    busanStock: "7.5",
+  }, "usr_admin");
+
+  assert.deepEqual(item.stockByWarehouse, { seoul: 12.5, incheon: 20, busan: 7.5 });
+  assert.equal(item.openingStock, 40);
+  assert.deepEqual((await repository.listItems())[0].stockByWarehouse, item.stockByWarehouse);
+});
+
+test("창고 재고는 음수와 소수 둘째 자리 초과를 거부한다", async () => {
+  const repository = memoryRepository();
+  await assert.rejects(
+    repository.createItem({
+      code: "I-004",
+      name: "잘못된 창고 재고",
+      unit: "EA",
+      seoulStock: "-1",
+      incheonStock: "1.234",
+      busanStock: "0",
+    }, "usr_admin"),
+    (error) => {
+      assert.ok(error instanceof InputValidationError);
+      assert.deepEqual(Object.keys(error.fieldErrors).sort(), ["incheonStock", "seoulStock"]);
+      return true;
+    },
+  );
 });
 
 test("품목 코드 중복과 잘못된 금액·재고를 막는다", async () => {

@@ -9,8 +9,17 @@ const TAX_TYPES = new Set(["taxable", "zero-rated", "exempt"]);
 const MAX_MONEY = 999_999_999_999;
 const MAX_QUANTITY = 999_999_999;
 
+export const WAREHOUSES = Object.freeze([
+  Object.freeze({ id: "seoul", name: "서울 창고", location: "서울" }),
+  Object.freeze({ id: "incheon", name: "인천 창고", location: "인천" }),
+  Object.freeze({ id: "busan", name: "부산 창고", location: "부산" }),
+]);
+
 const emptyData = () => ({ version: 1, partners: [], items: [] });
 const copy = (value) => structuredClone(value);
+const totalWarehouseStock = (stockByWarehouse) => (
+  Math.round(Object.values(stockByWarehouse).reduce((total, quantity) => total + quantity, 0) * 100) / 100
+);
 
 export class InputValidationError extends Error {
   constructor(fieldErrors) {
@@ -97,6 +106,18 @@ function validateItem(input) {
   const errors = {};
   const taxType = cleanText(input.taxType, 20) || "taxable";
   if (!TAX_TYPES.has(taxType)) errors.taxType = "과세 유형을 선택해 주세요.";
+  const hasWarehouseInput = WAREHOUSES.some(({ id }) => Object.hasOwn(input, `${id}Stock`));
+  const stockByWarehouse = {};
+
+  for (const warehouse of WAREHOUSES) {
+    const field = hasWarehouseInput ? `${warehouse.id}Stock` : warehouse.id === "seoul" ? "openingStock" : null;
+    stockByWarehouse[warehouse.id] = numericValue(field ? input[field] : 0, {
+      field: field ?? `${warehouse.id}Stock`,
+      label: `${warehouse.location} 창고 재고`,
+      maximum: MAX_QUANTITY,
+      decimals: 2,
+    }, errors);
+  }
 
   const item = {
     code: normalizedCode(input.code, "code", errors),
@@ -109,9 +130,8 @@ function validateItem(input) {
     salesPrice: numericValue(input.salesPrice, {
       field: "salesPrice", label: "판매 단가", maximum: MAX_MONEY,
     }, errors),
-    openingStock: numericValue(input.openingStock, {
-      field: "openingStock", label: "기초 재고", maximum: MAX_QUANTITY, decimals: 2,
-    }, errors),
+    stockByWarehouse,
+    openingStock: totalWarehouseStock(stockByWarehouse),
     safetyStock: numericValue(input.safetyStock, {
       field: "safetyStock", label: "안전 재고", maximum: MAX_QUANTITY, decimals: 2,
     }, errors),
@@ -132,6 +152,19 @@ function validateStoredData(value) {
     throw new Error("마스터 데이터 파일 형식이 올바르지 않습니다.");
   }
   return value;
+}
+
+function itemWithWarehouseStock(item) {
+  const hasWarehouseStock = item.stockByWarehouse && typeof item.stockByWarehouse === "object";
+  const stockByWarehouse = Object.fromEntries(WAREHOUSES.map(({ id }) => {
+    const quantity = hasWarehouseStock ? Number(item.stockByWarehouse[id]) : id === "seoul" ? Number(item.openingStock) : 0;
+    return [id, Number.isFinite(quantity) && quantity >= 0 ? quantity : 0];
+  }));
+  return {
+    ...item,
+    stockByWarehouse,
+    openingStock: totalWarehouseStock(stockByWarehouse),
+  };
 }
 
 export class MasterDataRepository {
@@ -162,7 +195,7 @@ export class MasterDataRepository {
 
   async listItems() {
     const data = await this.data();
-    return copy(data.items);
+    return copy(data.items.map(itemWithWarehouseStock));
   }
 
   async createPartner(type, input, actorId) {
