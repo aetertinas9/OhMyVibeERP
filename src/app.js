@@ -13,7 +13,12 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
-import { appPage, loginPage } from "./html.js";
+import { appPage, loginPage, partnerPage } from "./html.js";
+import {
+  createFileMasterDataRepository,
+  DuplicateRecordError,
+  InputValidationError,
+} from "./master-data.js";
 
 const publicDirectory = fileURLToPath(new URL("../public/", import.meta.url));
 
@@ -106,6 +111,7 @@ export async function createRequestHandler({
   now = Date.now,
   logger = console,
   credentialStore,
+  masterDataRepository,
   sessionStore = new SessionStore({ now }),
   rateLimiter = new LoginRateLimiter({ now }),
 } = {}) {
@@ -115,6 +121,10 @@ export async function createRequestHandler({
     username: env.ERP_ADMIN_USERNAME ?? "admin",
     password: env.ERP_ADMIN_PASSWORD ?? "ChangeMe123!",
     displayName: env.ERP_ADMIN_NAME ?? "관리자",
+  });
+  const masterData = masterDataRepository ?? createFileMasterDataRepository({
+    filePath: env.ERP_DATA_FILE,
+    now: () => new Date(now()),
   });
 
   const route = async (request, response) => {
@@ -229,6 +239,63 @@ export async function createRequestHandler({
       return;
     }
 
+    const partnerMatch = url.pathname.match(/^\/partners\/(sales|purchases)$/);
+    if (request.method === "GET" && partnerMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const type = partnerMatch[1];
+      const partners = await masterData.listPartners(type);
+      send(response, 200, partnerPage({
+        type,
+        user: session.user,
+        csrfToken: session.csrfToken,
+        partners,
+        created: url.searchParams.get("created") === "1",
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && partnerMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const type = partnerMatch[1];
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const values = Object.fromEntries([
+        "code", "name", "businessNumber", "representative", "contactName", "phone", "email", "address", "note",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createPartner(type, values, session.user.id);
+        redirect(response, `/partners/${type}?created=1`, [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof DuplicateRecordError)) throw error;
+        const partners = await masterData.listPartners(type);
+        send(response, error.statusCode, partnerPage({
+          type,
+          user: session.user,
+          csrfToken: session.csrfToken,
+          partners,
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error instanceof DuplicateRecordError ? error.message : "필수 항목과 입력 형식을 확인해 주세요.",
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/logout") {
       if (!session) {
         redirect(response, "/login", [serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })], secure);
@@ -252,7 +319,7 @@ export async function createRequestHandler({
       return;
     }
 
-    const knownPath = ["/login", "/app", "/logout", "/healthz"].includes(url.pathname);
+    const knownPath = ["/login", "/app", "/logout", "/healthz"].includes(url.pathname) || Boolean(partnerMatch);
     send(
       response,
       knownPath ? 405 : 404,

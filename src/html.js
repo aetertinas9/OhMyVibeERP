@@ -99,9 +99,22 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
   });
 }
 
-export function appPage({ user, csrfToken }) {
+const navigation = ({ active }) => `
+  <nav aria-label="주 메뉴">
+    <p>WORKSPACE</p>
+    <a class="${active === "home" ? "active" : ""}" href="/app"><span aria-hidden="true">⌂</span> 홈</a>
+    <p class="nav-section">기준 정보</p>
+    <a class="${active === "sales" ? "active" : ""}" href="/partners/sales"><span aria-hidden="true">↗</span> 판매처</a>
+    <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
+    <a href="#" aria-disabled="true"><span aria-hidden="true">◇</span> 품목 <em>준비 중</em></a>
+    <p class="nav-section">업무 관리</p>
+    <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
+    <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
+  </nav>`;
+
+function workspacePage({ title, active, user, csrfToken, content }) {
   return document({
-    title: "홈 | 다온 ERP",
+    title: `${title} | 다온 ERP`,
     pageClass: "app-page",
     body: `
       <div class="app-shell">
@@ -110,13 +123,7 @@ export function appPage({ user, csrfToken }) {
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span>DAON <b>ERP</b></span>
           </a>
-          <nav aria-label="주 메뉴">
-            <p>WORKSPACE</p>
-            <a class="active" href="/app"><span aria-hidden="true">⌂</span> 홈</a>
-            <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
-            <a href="#" aria-disabled="true"><span aria-hidden="true">▤</span> 재고 관리 <em>준비 중</em></a>
-            <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
-          </nav>
+          ${navigation({ active })}
           <div class="sidebar-user">
             <span class="avatar">${escapeHtml(user.displayName.slice(0, 1))}</span>
             <div><strong>${escapeHtml(user.displayName)}</strong><small>${escapeHtml(user.role)}</small></div>
@@ -131,7 +138,19 @@ export function appPage({ user, csrfToken }) {
               <button type="submit">로그아웃</button>
             </form>
           </header>
-          <section class="workspace-content">
+          ${content}
+        </main>
+      </div>`,
+  });
+}
+
+export function appPage({ user, csrfToken }) {
+  return workspacePage({
+    title: "홈",
+    active: "home",
+    user,
+    csrfToken,
+    content: `<section class="workspace-content">
             <p class="form-kicker">TODAY'S WORKSPACE</p>
             <h1>${escapeHtml(user.displayName)}님, 안녕하세요.</h1>
             <p class="workspace-intro">다온 ERP에 안전하게 로그인했습니다.</p>
@@ -140,7 +159,7 @@ export function appPage({ user, csrfToken }) {
               <div>
                 <span class="card-label">첫 번째 설정</span>
                 <h2>회사 업무를 시작할 준비가 됐어요.</h2>
-                <p>다음 단계에서 매출·매입, 재고, 인사 기능을 하나씩 연결할 수 있습니다.</p>
+                <p>판매처와 구매처를 구분해 회사의 거래 기준 정보를 등록할 수 있습니다.</p>
               </div>
               <div class="check-seal" aria-hidden="true">✓</div>
             </div>
@@ -150,9 +169,137 @@ export function appPage({ user, csrfToken }) {
               <article><span>처리할 주문</span><strong>—</strong><small>데이터 연결 전</small></article>
               <article><span>재고 알림</span><strong>—</strong><small>데이터 연결 전</small></article>
             </div>
-          </section>
-        </main>
-      </div>`,
+          </section>`,
+  });
+}
+
+const fieldError = (field, errors) => errors[field]
+  ? `<small class="field-error" id="${field}-error">${escapeHtml(errors[field])}</small>`
+  : "";
+
+const inputState = (field, errors) => errors[field]
+  ? ` aria-invalid="true" aria-describedby="${field}-error"`
+  : "";
+
+function formatBusinessNumber(value) {
+  return value?.length === 10 ? `${value.slice(0, 3)}-${value.slice(3, 5)}-${value.slice(5)}` : value || "—";
+}
+
+function formatDate(value) {
+  try {
+    return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium" }).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+export function partnerPage({
+  type,
+  user,
+  csrfToken,
+  partners,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+}) {
+  const isSales = type === "sales";
+  const label = isSales ? "판매처" : "구매처";
+  const description = isSales ? "우리 회사가 상품과 서비스를 판매하는 곳" : "우리 회사가 상품과 원재료를 구매하는 곳";
+  const rows = partners.length
+    ? partners.map((partner) => `
+      <tr>
+        <td><strong class="record-code">${escapeHtml(partner.code)}</strong></td>
+        <td><strong>${escapeHtml(partner.name)}</strong><small>${escapeHtml(partner.representative || "대표자 미등록")}</small></td>
+        <td>${escapeHtml(formatBusinessNumber(partner.businessNumber))}</td>
+        <td>${escapeHtml(partner.contactName || partner.phone || "—")}</td>
+        <td>${escapeHtml(formatDate(partner.createdAt))}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="5"><div class="empty-state"><span aria-hidden="true">＋</span><strong>등록된 ${label}가 없습니다.</strong><p>왼쪽 양식에서 첫 ${label}를 등록해 보세요.</p></div></td></tr>`;
+
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">${label} 등록을 완료했습니다.</div>`
+      : "";
+
+  return workspacePage({
+    title: `${label} 관리`,
+    active: type,
+    user,
+    csrfToken,
+    content: `<section class="master-content">
+      <header class="master-heading">
+        <div>
+          <p class="form-kicker">BUSINESS PARTNERS</p>
+          <h1>${label} 관리</h1>
+          <p>${description}을(를) 별도로 관리합니다.</p>
+        </div>
+        <div class="partner-tabs" aria-label="거래처 구분">
+          <a href="/partners/sales"${isSales ? ' aria-current="page"' : ""}>판매처</a>
+          <a href="/partners/purchases"${!isSales ? ' aria-current="page"' : ""}>구매처</a>
+        </div>
+      </header>
+
+      ${notice}
+
+      <div class="master-grid">
+        <section class="master-form-card" aria-labelledby="partner-form-title">
+          <div class="card-heading"><span>01</span><div><h2 id="partner-form-title">${label} 등록</h2><p><b>*</b> 표시는 필수 입력입니다.</p></div></div>
+          <form action="/partners/${type}" method="post" class="master-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="form-row two-columns">
+              <label>거래처 코드 <b>*</b>
+                <input name="code" value="${escapeHtml(values.code)}" placeholder="예: ${isSales ? "S-001" : "P-001"}" maxlength="30" required${inputState("code", fieldErrors)}>
+                ${fieldError("code", fieldErrors)}
+              </label>
+              <label>사업자등록번호
+                <input name="businessNumber" value="${escapeHtml(values.businessNumber)}" placeholder="000-00-00000" inputmode="numeric" maxlength="12"${inputState("businessNumber", fieldErrors)}>
+                ${fieldError("businessNumber", fieldErrors)}
+              </label>
+            </div>
+            <label>거래처명 <b>*</b>
+              <input name="name" value="${escapeHtml(values.name)}" placeholder="회사 또는 사업체 이름" maxlength="100" required${inputState("name", fieldErrors)}>
+              ${fieldError("name", fieldErrors)}
+            </label>
+            <div class="form-row two-columns">
+              <label>대표자
+                <input name="representative" value="${escapeHtml(values.representative)}" placeholder="대표자명" maxlength="60">
+              </label>
+              <label>담당자
+                <input name="contactName" value="${escapeHtml(values.contactName)}" placeholder="업무 담당자명" maxlength="60">
+              </label>
+            </div>
+            <div class="form-row two-columns">
+              <label>연락처
+                <input name="phone" value="${escapeHtml(values.phone)}" placeholder="02-0000-0000" maxlength="30">
+              </label>
+              <label>이메일
+                <input name="email" type="email" value="${escapeHtml(values.email)}" placeholder="partner@example.com" maxlength="120"${inputState("email", fieldErrors)}>
+                ${fieldError("email", fieldErrors)}
+              </label>
+            </div>
+            <label>주소
+              <input name="address" value="${escapeHtml(values.address)}" placeholder="사업장 주소" maxlength="200">
+            </label>
+            <label>메모
+              <textarea name="note" placeholder="거래 조건 등 참고할 내용을 입력하세요" maxlength="500">${escapeHtml(values.note)}</textarea>
+            </label>
+            <button type="submit" class="primary-action">${label} 등록 <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
+
+        <section class="master-list-card" aria-labelledby="partner-list-title">
+          <div class="list-heading"><div><p>REGISTERED</p><h2 id="partner-list-title">${label} 목록</h2></div><strong>${partners.length}<small>곳</small></strong></div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>코드</th><th>거래처명</th><th>사업자번호</th><th>담당/연락처</th><th>등록일</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>`,
   });
 }
 
