@@ -35,6 +35,8 @@ test("발주·주문 금액은 실제 입고·출고 전까지 월간 금액에 
     differenceAmount: 0,
     purchaseCount: 0,
     salesCount: 0,
+    purchaseReturnCount: 0,
+    salesReturnCount: 0,
     transactions: [],
   });
 });

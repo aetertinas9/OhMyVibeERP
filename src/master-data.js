@@ -194,31 +194,108 @@ function purchaseReceiptAmount(order, receipt) {
   }, 0));
 }
 
+function orderMovementAmount(order, movement, missingLineMessage) {
+  return roundMoney((movement?.lines ?? []).reduce((total, movementLine) => {
+    const orderLine = order.lines.find(({ id }) => id === movementLine.lineId);
+    if (!orderLine) throw new BusinessRuleError(missingLineMessage);
+    return total + Number(movementLine.quantity) * Number(orderLine.unitPrice);
+  }, 0));
+}
+
+function returnedQuantity(order, lineId) {
+  return roundMoney((order.returns ?? []).reduce((total, returnRecord) => (
+    total + (returnRecord.lines ?? [])
+      .filter((line) => line.lineId === lineId)
+      .reduce((lineTotal, line) => lineTotal + Number(line.quantity), 0)
+  ), 0));
+}
+
 function purchaseOrderWithSettlement(order) {
   const paidAmount = Number(order.paidAmount ?? 0);
+  const returns = order.returns ?? [];
+  const lines = (order.lines ?? []).map((line) => ({
+    ...line,
+    returnedQuantity: returnedQuantity(order, line.id),
+  }));
   const receivedAmount = roundMoney((order.receipts ?? []).reduce((total, receipt) => (
     total + purchaseReceiptAmount(order, receipt)
   ), 0));
+  const returnedAmount = roundMoney(returns.reduce((total, returnRecord) => (
+    total + orderMovementAmount(order, returnRecord, "구매 반품 이력의 발주 행을 찾을 수 없습니다.")
+  ), 0));
+  const netPurchaseAmount = roundMoney(receivedAmount - returnedAmount);
   const payableAmount = order.payableAmount === undefined
-    ? roundMoney(Math.max(receivedAmount - paidAmount, 0))
+    ? roundMoney(Math.max(netPurchaseAmount - paidAmount, 0))
     : Number(order.payableAmount);
-  if (![paidAmount, receivedAmount, payableAmount].every((amount) => Number.isFinite(amount) && amount >= 0)) {
+  const supplierRefundReceivableAmount = order.supplierRefundReceivableAmount === undefined
+    ? roundMoney(Math.max(paidAmount - netPurchaseAmount, 0))
+    : Number(order.supplierRefundReceivableAmount);
+  if (
+    ![paidAmount, receivedAmount, returnedAmount, netPurchaseAmount, payableAmount, supplierRefundReceivableAmount]
+      .every((amount) => Number.isFinite(amount) && amount >= 0)
+  ) {
     throw new BusinessRuleError("발주의 지급 금액 정보가 올바르지 않습니다.");
   }
-  return { ...order, receivedAmount, paidAmount, payableAmount };
+  return {
+    ...order,
+    lines,
+    returns,
+    receivedAmount,
+    returnedAmount,
+    netPurchaseAmount,
+    paidAmount,
+    payableAmount,
+    supplierRefundReceivableAmount,
+  };
 }
 
 function salesOrderWithSettlement(order) {
-  const receivableAmount = Number(order.receivableAmount ?? 0);
+  const returns = order.returns ?? [];
+  const lines = (order.lines ?? []).map((line) => ({
+    ...line,
+    returnedQuantity: returnedQuantity(order, line.id),
+  }));
+  const storedReceivableAmount = Number(order.receivableAmount ?? 0);
   const collectedAmount = Number(order.collectedAmount ?? 0);
-  if (![receivableAmount, collectedAmount].every((amount) => Number.isFinite(amount) && amount >= 0)) {
+  const returnedAmount = roundMoney(returns.reduce((total, returnRecord) => (
+    total + orderMovementAmount(order, returnRecord, "판매 반품 이력의 주문 행을 찾을 수 없습니다.")
+  ), 0));
+  const storedCustomerRefundPayableAmount = Number(order.customerRefundPayableAmount ?? 0);
+  const shipmentAmount = roundMoney((order.shipments ?? []).reduce((total, shipment) => (
+    total + orderMovementAmount(order, shipment, "출고 이력의 주문 행을 찾을 수 없습니다.")
+  ), 0));
+  const shippedAmount = shipmentAmount || roundMoney(
+    storedReceivableAmount + collectedAmount - storedCustomerRefundPayableAmount + returnedAmount,
+  );
+  const netSalesAmount = roundMoney(shippedAmount - returnedAmount);
+  const receivableAmount = order.receivableAmount === undefined
+    ? roundMoney(Math.max(netSalesAmount - collectedAmount, 0))
+    : storedReceivableAmount;
+  const customerRefundPayableAmount = order.customerRefundPayableAmount === undefined
+    ? roundMoney(Math.max(collectedAmount - netSalesAmount, 0))
+    : storedCustomerRefundPayableAmount;
+  if (
+    ![
+      receivableAmount,
+      collectedAmount,
+      returnedAmount,
+      shippedAmount,
+      netSalesAmount,
+      customerRefundPayableAmount,
+    ].every((amount) => Number.isFinite(amount) && amount >= 0)
+  ) {
     throw new BusinessRuleError("판매 주문의 수금 금액 정보가 올바르지 않습니다.");
   }
   return {
     ...order,
+    lines,
+    returns,
     receivableAmount,
     collectedAmount,
-    shippedAmount: roundMoney(receivableAmount + collectedAmount),
+    shippedAmount,
+    returnedAmount,
+    netSalesAmount,
+    customerRefundPayableAmount,
   };
 }
 
@@ -358,6 +435,24 @@ function validateSalesOrderInput(input) {
     requestedShipDate,
     note: cleanText(input.note, 500),
     lines,
+  };
+}
+
+function validateReturnInput(input, type) {
+  if (type !== "sales" && type !== "purchase") throw new Error("알 수 없는 반품 유형입니다.");
+  const errors = {};
+  const label = type === "sales" ? "판매 반품" : "구매 반품";
+  const returnDate = dateValue(input.returnDate, "returnDate", "반품일", errors, { required: true });
+  const submittedLines = Array.isArray(input.lines) ? input.lines : [];
+  if (!submittedLines.some((line) => String(line?.quantity ?? "").trim() && Number(line.quantity) !== 0)) {
+    errors.return = `${label} 수량을 하나 이상 입력해 주세요.`;
+  }
+  if (submittedLines.length > 20) errors.return = "반품 품목은 최대 20개까지 입력할 수 있습니다.";
+  if (Object.keys(errors).length) throw new InputValidationError(errors);
+  return {
+    returnDate,
+    note: cleanText(input.note, 300),
+    lines: submittedLines.slice(0, 20),
   };
 }
 
@@ -636,18 +731,24 @@ export class MasterDataRepository {
     const purchasesByPartner = new Map();
 
     for (const order of salesOrders) {
-      const current = salesByPartner.get(order.customerId) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 };
-      current.transactionAmount = roundMoney(current.transactionAmount + order.shippedAmount);
+      const current = salesByPartner.get(order.customerId) ?? {
+        transactionAmount: 0, settledAmount: 0, balance: 0, refundBalance: 0, documentCount: 0,
+      };
+      current.transactionAmount = roundMoney(current.transactionAmount + order.netSalesAmount);
       current.settledAmount = roundMoney(current.settledAmount + order.collectedAmount);
       current.balance = roundMoney(current.balance + order.receivableAmount);
+      current.refundBalance = roundMoney(current.refundBalance + order.customerRefundPayableAmount);
       if (order.receivableAmount > 0) current.documentCount += 1;
       salesByPartner.set(order.customerId, current);
     }
     for (const order of purchaseOrders) {
-      const current = purchasesByPartner.get(order.supplierId) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 };
-      current.transactionAmount = roundMoney(current.transactionAmount + order.receivedAmount);
+      const current = purchasesByPartner.get(order.supplierId) ?? {
+        transactionAmount: 0, settledAmount: 0, balance: 0, refundBalance: 0, documentCount: 0,
+      };
+      current.transactionAmount = roundMoney(current.transactionAmount + order.netPurchaseAmount);
       current.settledAmount = roundMoney(current.settledAmount + order.paidAmount);
       current.balance = roundMoney(current.balance + order.payableAmount);
+      current.refundBalance = roundMoney(current.refundBalance + order.supplierRefundReceivableAmount);
       if (order.payableAmount > 0) current.documentCount += 1;
       purchasesByPartner.set(order.supplierId, current);
     }
@@ -658,7 +759,9 @@ export class MasterDataRepository {
         partnerId: partner.id,
         code: partner.code,
         name: partner.name,
-        ...(balanceMap.get(partner.id) ?? { transactionAmount: 0, settledAmount: 0, balance: 0, documentCount: 0 }),
+        ...(balanceMap.get(partner.id) ?? {
+          transactionAmount: 0, settledAmount: 0, balance: 0, refundBalance: 0, documentCount: 0,
+        }),
       }))
       .sort((left, right) => right.balance - left.balance || left.code.localeCompare(right.code));
 
@@ -688,7 +791,7 @@ export class MasterDataRepository {
         partnerCode: partnerMap.get(order.customerId)?.code ?? order.customerId,
         partnerName: partnerMap.get(order.customerId)?.name ?? "알 수 없는 판매처",
         documentDate: order.orderDate,
-        transactionAmount: order.shippedAmount,
+        transactionAmount: order.netSalesAmount,
         settledAmount: order.collectedAmount,
         balance: order.receivableAmount,
       }))
@@ -702,19 +805,47 @@ export class MasterDataRepository {
         partnerCode: partnerMap.get(order.supplierId)?.code ?? order.supplierId,
         partnerName: partnerMap.get(order.supplierId)?.name ?? "알 수 없는 구매처",
         documentDate: order.orderDate,
-        transactionAmount: order.receivedAmount,
+        transactionAmount: order.netPurchaseAmount,
         settledAmount: order.paidAmount,
         balance: order.payableAmount,
+      }))
+      .sort((left, right) => right.documentDate.localeCompare(left.documentDate) || right.number.localeCompare(left.number));
+    const customerRefundDocuments = salesOrders
+      .filter(({ customerRefundPayableAmount }) => customerRefundPayableAmount > 0)
+      .map((order) => ({
+        id: order.id,
+        number: order.number,
+        partnerId: order.customerId,
+        partnerCode: partnerMap.get(order.customerId)?.code ?? order.customerId,
+        partnerName: partnerMap.get(order.customerId)?.name ?? "알 수 없는 판매처",
+        documentDate: order.orderDate,
+        balance: order.customerRefundPayableAmount,
+      }))
+      .sort((left, right) => right.documentDate.localeCompare(left.documentDate) || right.number.localeCompare(left.number));
+    const supplierRefundDocuments = purchaseOrders
+      .filter(({ supplierRefundReceivableAmount }) => supplierRefundReceivableAmount > 0)
+      .map((order) => ({
+        id: order.id,
+        number: order.number,
+        partnerId: order.supplierId,
+        partnerCode: partnerMap.get(order.supplierId)?.code ?? order.supplierId,
+        partnerName: partnerMap.get(order.supplierId)?.name ?? "알 수 없는 구매처",
+        documentDate: order.orderDate,
+        balance: order.supplierRefundReceivableAmount,
       }))
       .sort((left, right) => right.documentDate.localeCompare(left.documentDate) || right.number.localeCompare(left.number));
 
     return copy({
       receivableTotal: roundMoney(receivableDocuments.reduce((total, document) => total + document.balance, 0)),
       payableTotal: roundMoney(payableDocuments.reduce((total, document) => total + document.balance, 0)),
+      customerRefundPayableTotal: roundMoney(customerRefundDocuments.reduce((total, document) => total + document.balance, 0)),
+      supplierRefundReceivableTotal: roundMoney(supplierRefundDocuments.reduce((total, document) => total + document.balance, 0)),
       customerBalances: partnerBalances("sales", salesByPartner),
       supplierBalances: partnerBalances("purchases", purchasesByPartner),
       receivableDocuments,
       payableDocuments,
+      customerRefundDocuments,
+      supplierRefundDocuments,
       transactions,
     });
   }
@@ -916,8 +1047,68 @@ export class MasterDataRepository {
         };
       }));
 
-    const purchaseAmount = roundMoney(purchases.reduce((total, transaction) => total + transaction.amount, 0));
-    const salesAmount = roundMoney(sales.reduce((total, transaction) => total + transaction.amount, 0));
+    const purchaseReturns = data.purchaseOrders.flatMap((order) => (order.returns ?? [])
+      .filter((returnRecord) => inMonth(returnRecord.returnedAt))
+      .map((returnRecord) => {
+        const lines = returnRecord.lines.map((returnLine) => {
+          const orderLine = order.lines.find(({ id }) => id === returnLine.lineId);
+          if (!orderLine) throw new BusinessRuleError("구매 반품 이력의 발주 행을 찾을 수 없습니다.");
+          const amount = roundMoney(returnLine.quantity * orderLine.unitPrice);
+          return {
+            itemId: orderLine.itemId,
+            quantity: returnLine.quantity,
+            unitPrice: orderLine.unitPrice,
+            amount,
+          };
+        });
+        return {
+          id: returnRecord.id,
+          type: "purchase_return",
+          occurredAt: returnRecord.returnedAt,
+          documentNumber: returnRecord.number,
+          sourceDocumentNumber: order.number,
+          partnerId: order.supplierId,
+          warehouseId: order.warehouseId,
+          lines,
+          amount: roundMoney(lines.reduce((total, line) => total + line.amount, 0)),
+        };
+      }));
+
+    const salesReturns = data.salesOrders.flatMap((order) => (order.returns ?? [])
+      .filter((returnRecord) => inMonth(returnRecord.returnedAt))
+      .map((returnRecord) => {
+        const lines = returnRecord.lines.map((returnLine) => {
+          const orderLine = order.lines.find(({ id }) => id === returnLine.lineId);
+          if (!orderLine) throw new BusinessRuleError("판매 반품 이력의 주문 행을 찾을 수 없습니다.");
+          const amount = roundMoney(returnLine.quantity * orderLine.unitPrice);
+          return {
+            itemId: orderLine.itemId,
+            quantity: returnLine.quantity,
+            unitPrice: orderLine.unitPrice,
+            amount,
+          };
+        });
+        return {
+          id: returnRecord.id,
+          type: "sales_return",
+          occurredAt: returnRecord.returnedAt,
+          documentNumber: returnRecord.number,
+          sourceDocumentNumber: order.number,
+          partnerId: order.customerId,
+          warehouseId: order.warehouseId,
+          lines,
+          amount: roundMoney(lines.reduce((total, line) => total + line.amount, 0)),
+        };
+      }));
+
+    const purchaseAmount = roundMoney(
+      purchases.reduce((total, transaction) => total + transaction.amount, 0)
+      - purchaseReturns.reduce((total, transaction) => total + transaction.amount, 0),
+    );
+    const salesAmount = roundMoney(
+      sales.reduce((total, transaction) => total + transaction.amount, 0)
+      - salesReturns.reduce((total, transaction) => total + transaction.amount, 0),
+    );
     return copy({
       month,
       purchaseAmount,
@@ -925,7 +1116,9 @@ export class MasterDataRepository {
       differenceAmount: roundMoney(salesAmount - purchaseAmount),
       purchaseCount: purchases.length,
       salesCount: sales.length,
-      transactions: [...purchases, ...sales].sort((left, right) => (
+      purchaseReturnCount: purchaseReturns.length,
+      salesReturnCount: salesReturns.length,
+      transactions: [...purchases, ...sales, ...purchaseReturns, ...salesReturns].sort((left, right) => (
         right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
       )),
     });
@@ -1083,6 +1276,7 @@ export class MasterDataRepository {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           receivedQuantity: 0,
+          returnedQuantity: 0,
         };
       });
 
@@ -1102,8 +1296,10 @@ export class MasterDataRepository {
         totalAmount: lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0),
         payableAmount: 0,
         paidAmount: 0,
+        supplierRefundReceivableAmount: 0,
         note: validated.note,
         receipts: [],
+        returns: [],
         createdAt: timestamp,
         createdBy: actorId,
       };
@@ -1177,6 +1373,88 @@ export class MasterDataRepository {
     });
   }
 
+  async returnPurchaseOrder(orderId, input, actorId) {
+    const validated = validateReturnInput(input, "purchase");
+    return this.mutate((data) => {
+      assertOpenPeriod(data, validated.returnDate);
+      const order = data.purchaseOrders.find(({ id }) => id === orderId);
+      if (!order) throw new RecordNotFoundError("발주를 찾을 수 없습니다.");
+
+      const errors = {};
+      const seenLineIds = new Set();
+      const returnLines = [];
+      for (const submitted of validated.lines) {
+        const lineId = cleanText(submitted?.lineId, 120);
+        const source = String(submitted?.quantity ?? "").trim();
+        if (!lineId || !source || Number(source) === 0) continue;
+        if (seenLineIds.has(lineId)) throw new BusinessRuleError("같은 발주 행을 중복 반품할 수 없습니다.");
+        seenLineIds.add(lineId);
+        const line = order.lines.find(({ id }) => id === lineId);
+        if (!line) throw new BusinessRuleError("발주에 없는 품목 행입니다.");
+        const field = `return_${lineId}`;
+        const quantity = positiveQuantity(source, field, "구매 반품 수량", errors);
+        const alreadyReturned = returnedQuantity(order, lineId);
+        const returnable = roundMoney(Number(line.receivedQuantity) - alreadyReturned);
+        if (!errors[field] && quantity > returnable) {
+          errors[field] = `반품 가능 수량 ${returnable.toLocaleString("ko-KR")}을(를) 초과할 수 없습니다.`;
+        }
+        const item = data.items.find(({ id }) => id === line.itemId);
+        if (!item) throw new BusinessRuleError("발주 품목이 삭제되어 반품할 수 없습니다.");
+        const normalized = itemWithWarehouseStock(item);
+        const available = normalized.stockByWarehouse[order.warehouseId];
+        if (!errors[field] && quantity > available) {
+          errors[field] = `현재 창고 재고 ${available.toLocaleString("ko-KR")}보다 많이 반품 출고할 수 없습니다.`;
+        }
+        returnLines.push({ line, item, normalized, quantity });
+      }
+      if (!returnLines.length) errors.return = "구매 반품 수량을 하나 이상 입력해 주세요.";
+      if (Object.keys(errors).length) throw new InputValidationError(errors);
+
+      const normalizedOrder = purchaseOrderWithSettlement(order);
+      const amount = roundMoney(returnLines.reduce((total, { line, quantity }) => (
+        total + quantity * line.unitPrice
+      ), 0));
+      const payableReduction = Math.min(normalizedOrder.payableAmount, amount);
+      const supplierRefundReceivableIncrease = roundMoney(amount - payableReduction);
+      for (const returnLine of returnLines) {
+        returnLine.normalized.stockByWarehouse[order.warehouseId] = roundMoney(
+          returnLine.normalized.stockByWarehouse[order.warehouseId] - returnLine.quantity,
+        );
+        returnLine.item.stockByWarehouse = returnLine.normalized.stockByWarehouse;
+        returnLine.item.openingStock = totalWarehouseStock(returnLine.normalized.stockByWarehouse);
+        returnLine.line.returnedQuantity = roundMoney(
+          returnedQuantity(order, returnLine.line.id) + returnLine.quantity,
+        );
+      }
+      order.returns ??= [];
+      order.paidAmount = normalizedOrder.paidAmount;
+      order.payableAmount = roundMoney(normalizedOrder.payableAmount - payableReduction);
+      order.supplierRefundReceivableAmount = roundMoney(
+        normalizedOrder.supplierRefundReceivableAmount + supplierRefundReceivableIncrease,
+      );
+      const dateKey = validated.returnDate.replaceAll("-", "");
+      const prefix = `PRTN-${dateKey}-`;
+      const sequence = data.purchaseOrders.flatMap(({ returns = [] }) => returns)
+        .filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const record = {
+        id: `purchase_return_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        returnDate: validated.returnDate,
+        returnedAt: `${validated.returnDate}T00:00:00+09:00`,
+        createdAt: this.now().toISOString(),
+        returnedBy: cleanText(actorId, 120),
+        amount,
+        payableReduction,
+        supplierRefundReceivableIncrease,
+        note: validated.note,
+        lines: returnLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
+      };
+      order.returns.unshift(record);
+      order.updatedAt = record.createdAt;
+      return record;
+    });
+  }
+
   async createSalesOrder(input, actorId) {
     const validated = validateSalesOrderInput(input);
     return this.mutate((data) => {
@@ -1200,6 +1478,7 @@ export class MasterDataRepository {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           shippedQuantity: 0,
+          returnedQuantity: 0,
         };
       });
 
@@ -1219,8 +1498,10 @@ export class MasterDataRepository {
         totalAmount: Math.round(lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0) * 100) / 100,
         receivableAmount: 0,
         collectedAmount: 0,
+        customerRefundPayableAmount: 0,
         note: validated.note,
         shipments: [],
+        returns: [],
         createdAt: timestamp,
         createdBy: actorId,
       };
@@ -1294,6 +1575,83 @@ export class MasterDataRepository {
         lines: shipmentLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
       });
       return order;
+    });
+  }
+
+  async returnSalesOrder(orderId, input, actorId) {
+    const validated = validateReturnInput(input, "sales");
+    return this.mutate((data) => {
+      assertOpenPeriod(data, validated.returnDate);
+      const order = data.salesOrders.find(({ id }) => id === orderId);
+      if (!order) throw new RecordNotFoundError("판매 주문을 찾을 수 없습니다.");
+
+      const errors = {};
+      const seenLineIds = new Set();
+      const returnLines = [];
+      for (const submitted of validated.lines) {
+        const lineId = cleanText(submitted?.lineId, 120);
+        const source = String(submitted?.quantity ?? "").trim();
+        if (!lineId || !source || Number(source) === 0) continue;
+        if (seenLineIds.has(lineId)) throw new BusinessRuleError("같은 주문 행을 중복 반품할 수 없습니다.");
+        seenLineIds.add(lineId);
+        const line = order.lines.find(({ id }) => id === lineId);
+        if (!line) throw new BusinessRuleError("주문에 없는 품목 행입니다.");
+        const field = `return_${lineId}`;
+        const quantity = positiveQuantity(source, field, "판매 반품 수량", errors);
+        const alreadyReturned = returnedQuantity(order, lineId);
+        const returnable = roundMoney(Number(line.shippedQuantity) - alreadyReturned);
+        if (!errors[field] && quantity > returnable) {
+          errors[field] = `반품 가능 수량 ${returnable.toLocaleString("ko-KR")}을(를) 초과할 수 없습니다.`;
+        }
+        const item = data.items.find(({ id }) => id === line.itemId);
+        if (!item) throw new BusinessRuleError("주문 품목이 삭제되어 반품할 수 없습니다.");
+        returnLines.push({ line, item, normalized: itemWithWarehouseStock(item), quantity });
+      }
+      if (!returnLines.length) errors.return = "판매 반품 수량을 하나 이상 입력해 주세요.";
+      if (Object.keys(errors).length) throw new InputValidationError(errors);
+
+      const normalizedOrder = salesOrderWithSettlement(order);
+      const amount = roundMoney(returnLines.reduce((total, { line, quantity }) => (
+        total + quantity * line.unitPrice
+      ), 0));
+      const receivableReduction = Math.min(normalizedOrder.receivableAmount, amount);
+      const customerRefundPayableIncrease = roundMoney(amount - receivableReduction);
+      for (const returnLine of returnLines) {
+        returnLine.normalized.stockByWarehouse[order.warehouseId] = roundMoney(
+          returnLine.normalized.stockByWarehouse[order.warehouseId] + returnLine.quantity,
+        );
+        returnLine.item.stockByWarehouse = returnLine.normalized.stockByWarehouse;
+        returnLine.item.openingStock = totalWarehouseStock(returnLine.normalized.stockByWarehouse);
+        returnLine.line.returnedQuantity = roundMoney(
+          returnedQuantity(order, returnLine.line.id) + returnLine.quantity,
+        );
+      }
+      order.returns ??= [];
+      order.collectedAmount = normalizedOrder.collectedAmount;
+      order.receivableAmount = roundMoney(normalizedOrder.receivableAmount - receivableReduction);
+      order.customerRefundPayableAmount = roundMoney(
+        normalizedOrder.customerRefundPayableAmount + customerRefundPayableIncrease,
+      );
+      const dateKey = validated.returnDate.replaceAll("-", "");
+      const prefix = `SRTN-${dateKey}-`;
+      const sequence = data.salesOrders.flatMap(({ returns = [] }) => returns)
+        .filter(({ number }) => number?.startsWith(prefix)).length + 1;
+      const record = {
+        id: `sales_return_${this.createId()}`,
+        number: `${prefix}${String(sequence).padStart(3, "0")}`,
+        returnDate: validated.returnDate,
+        returnedAt: `${validated.returnDate}T00:00:00+09:00`,
+        createdAt: this.now().toISOString(),
+        returnedBy: cleanText(actorId, 120),
+        amount,
+        receivableReduction,
+        customerRefundPayableIncrease,
+        note: validated.note,
+        lines: returnLines.map(({ line, quantity }) => ({ lineId: line.id, quantity })),
+      };
+      order.returns.unshift(record);
+      order.updatedAt = record.createdAt;
+      return record;
     });
   }
 
