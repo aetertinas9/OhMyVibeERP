@@ -20,6 +20,8 @@ test("로그인 화면과 기본 보안 헤더를 제공한다", async () => {
   const { response, csrfToken, csrfCookie } = await loginPage(handler);
 
   assert.equal(response.statusCode, 200);
+  assert.match(response.body, /OhMyVibe<b>ERP<\/b>/);
+  assert.doesNotMatch(response.body, /다온|DAON/);
   assert.match(response.body, /다시 만나 반갑습니다/);
   assert.match(response.body, /admin/);
   assert.ok(csrfToken);
@@ -50,7 +52,7 @@ test("로그인 성공 후 보호된 ERP 홈에 접근한다", async () => {
 
   const app = await request(handler, { path: "/app", headers: { cookie: sessionCookie } });
   assert.equal(app.statusCode, 200);
-  assert.match(app.body, /안전하게 로그인했습니다/);
+  assert.match(app.body, /OhMyVibeERP에 안전하게 로그인했습니다/);
   assert.match(app.body, /시스템 관리자/);
 });
 

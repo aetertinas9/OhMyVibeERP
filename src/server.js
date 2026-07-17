@@ -9,5 +9,5 @@ const handler = await createRequestHandler();
 const server = createServer(handler);
 
 server.listen(port, host, () => {
-  console.log(`다온 ERP가 http://${host}:${port} 에서 실행 중입니다.`);
+  console.log(`OhMyVibeERP가 http://${host}:${port} 에서 실행 중입니다.`);
 });

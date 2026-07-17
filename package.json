@@ -1,8 +1,8 @@
 {
-  "name": "vibe-erp",
+  "name": "oh-my-vibe-erp",
   "version": "0.1.0",
   "private": true,
-  "description": "중소기업용 ERP 실증 프로젝트",
+  "description": "OhMyVibeERP 중소기업용 ERP 실증 프로젝트",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",

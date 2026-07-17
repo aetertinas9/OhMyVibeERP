@@ -33,14 +33,14 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
     : "";
 
   return document({
-    title: "로그인 | 다온 ERP",
+    title: "로그인 | OhMyVibeERP",
     pageClass: "login-page",
     body: `
       <main class="login-shell">
         <section class="brand-panel" aria-labelledby="brand-title">
-          <a class="brand" href="/login" aria-label="다온 ERP 로그인">
+          <a class="brand" href="/login" aria-label="OhMyVibeERP 로그인">
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span>DAON <b>ERP</b></span>
+            <span>OhMyVibe<b>ERP</b></span>
           </a>
           <div class="brand-copy">
             <p class="eyebrow">Work, in one flow</p>
@@ -53,16 +53,16 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
             <span class="glow-dot dot-one"></span>
             <span class="glow-dot dot-two"></span>
           </div>
-          <p class="brand-foot">© 2026 Daon Company. All rights reserved.</p>
+          <p class="brand-foot">© 2026 OhMyVibeERP. All rights reserved.</p>
         </section>
 
         <section class="form-panel">
           <div class="form-wrap">
             <div class="mobile-brand" aria-hidden="true">
               <span class="brand-mark"><i></i><i></i><i></i></span>
-              <span>DAON <b>ERP</b></span>
+              <span>OhMyVibe<b>ERP</b></span>
             </div>
-            <p class="form-kicker">DAON WORKSPACE</p>
+            <p class="form-kicker">OHMYVIBE WORKSPACE</p>
             <h2>다시 만나 반갑습니다</h2>
             <p class="form-intro">업무를 계속하려면 계정에 로그인하세요.</p>
 
@@ -92,7 +92,7 @@ export function loginPage({ csrfToken = "", error = "", username = "", showDemoA
               <span>DEMO</span>
               <p><strong>체험 계정</strong><br><code>admin</code> / <code>ChangeMe123!</code></p>
             </aside>` : ""}
-            <p class="help-text">로그인에 문제가 있나요? <a href="mailto:help@daon.example">관리자에게 문의</a></p>
+            <p class="help-text">로그인에 문제가 있나요? <a href="mailto:help@ohmyvibeerp.example">관리자에게 문의</a></p>
           </div>
         </section>
       </main>`,
@@ -115,14 +115,14 @@ const navigation = ({ active }) => `
 
 function workspacePage({ title, active, user, csrfToken, content }) {
   return document({
-    title: `${title} | 다온 ERP`,
+    title: `${title} | OhMyVibeERP`,
     pageClass: "app-page",
     body: `
       <div class="app-shell">
         <aside class="sidebar">
-          <a class="brand sidebar-brand" href="/app" aria-label="다온 ERP 홈">
+          <a class="brand sidebar-brand" href="/app" aria-label="OhMyVibeERP 홈">
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span>DAON <b>ERP</b></span>
+            <span>OhMyVibe<b>ERP</b></span>
           </a>
           ${navigation({ active })}
           <div class="sidebar-user">
@@ -154,7 +154,7 @@ export function appPage({ user, csrfToken }) {
     content: `<section class="workspace-content">
             <p class="form-kicker">TODAY'S WORKSPACE</p>
             <h1>${escapeHtml(user.displayName)}님, 안녕하세요.</h1>
-            <p class="workspace-intro">다온 ERP에 안전하게 로그인했습니다.</p>
+            <p class="workspace-intro">OhMyVibeERP에 안전하게 로그인했습니다.</p>
 
             <div class="welcome-card">
               <div>

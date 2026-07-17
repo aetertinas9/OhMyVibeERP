@@ -146,7 +146,7 @@ test("품목 코드 중복과 잘못된 금액·재고를 막는다", async () =
 });
 
 test("파일 저장소는 등록 데이터를 원자 파일로 영속화한다", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "vibe-erp-master-data-"));
+  const directory = await mkdtemp(join(tmpdir(), "oh-my-vibe-erp-master-data-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const filePath = join(directory, "master-data.json");
   const repository = createFileMasterDataRepository({
