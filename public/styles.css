@@ -422,6 +422,8 @@ button, input { font: inherit; }
 .partner-tabs { display: flex; padding: 4px; border: 1px solid #d9dcd6; border-radius: 8px; background: rgba(255,255,255,.48); }
 .partner-tabs a { min-width: 86px; padding: 9px 16px; border-radius: 5px; color: #73807b; font-size: 12px; font-weight: 600; text-align: center; text-decoration: none; }
 .partner-tabs a[aria-current="page"] { color: #fff; background: var(--green); box-shadow: 0 3px 10px rgba(21,58,51,.15); }
+.heading-count { padding: 10px 14px; border: 1px solid #d9dcd6; border-radius: 7px; color: #78847f; background: rgba(255,255,255,.48); font-size: 10px; }
+.heading-count b { margin-right: 4px; color: var(--green); font-size: 15px; }
 
 .form-notice { margin: -8px 0 20px; padding: 13px 16px; border: 1px solid; border-radius: 8px; font-size: 12px; }
 .form-notice.success { border-color: #b9d4c2; color: #24643b; background: #edf8f0; }
@@ -448,7 +450,12 @@ button, input { font: inherit; }
 .master-form input[aria-invalid="true"] { border-color: #bf6a53; background: #fffafa; }
 .form-row { display: grid; gap: 12px; }
 .form-row.two-columns { grid-template-columns: 1fr 1fr; }
+.form-row.three-columns { grid-template-columns: 1fr 1.15fr .75fr; align-items: end; }
+.form-hint { align-self: center; margin-top: 18px; color: #9aa39f; font-size: 9px; }
 .field-error { color: #a5422b; font-size: 9px; font-weight: 500; line-height: 1.45; }
+.money-input { position: relative; display: block; }
+.money-input input { padding-right: 34px; }
+.money-input i { position: absolute; top: 50%; right: 12px; color: #8c9692; font-size: 10px; font-style: normal; font-weight: 500; transform: translateY(-50%); }
 
 .primary-action { display: flex; align-items: center; justify-content: center; gap: 10px; height: 48px; margin-top: 2px; border: 0; border-radius: 7px; color: #fff; background: var(--green); cursor: pointer; font-size: 12px; font-weight: 700; box-shadow: 0 7px 16px rgba(21,58,51,.14); }
 .primary-action:hover { background: #1d4c43; }
@@ -467,6 +474,12 @@ button, input { font: inherit; }
 .master-list-card td strong { display: block; color: #293832; font-size: 11px; }
 .master-list-card td small { display: block; margin-top: 4px; color: #9ba39f; font-size: 9px; }
 .record-code { display: inline-block !important; padding: 4px 7px; border-radius: 4px; color: var(--green) !important; background: #e7eee9; font-family: ui-monospace, monospace; font-size: 9px !important; letter-spacing: .03em; }
+.number-cell { text-align: right; }
+.tax-badge { display: inline-block; padding: 4px 7px; border-radius: 10px; font-size: 9px; font-weight: 600; }
+.tax-badge.taxable { color: #75501a; background: #fff0d8; }
+.tax-badge.zero-rated { color: #24643b; background: #e6f4ea; }
+.tax-badge.exempt { color: #5f6178; background: #ececf3; }
+.item-master-grid { grid-template-columns: minmax(410px, 480px) minmax(620px, 1fr); }
 
 .empty-state { display: grid; place-items: center; min-height: 265px; color: #8c9792; text-align: center; }
 .empty-state > span { display: grid; place-items: center; width: 50px; height: 50px; margin-bottom: 13px; border: 1px dashed #bfc6c1; border-radius: 50%; color: var(--orange); font-size: 23px; }
@@ -485,4 +498,6 @@ button, input { font: inherit; }
   .partner-tabs a { flex: 1; }
   .master-form-card { padding: 22px 18px; }
   .form-row.two-columns { grid-template-columns: 1fr; }
+  .form-row.three-columns { grid-template-columns: 1fr; }
+  .form-hint { display: none; }
 }

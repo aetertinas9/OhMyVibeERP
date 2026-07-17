@@ -13,7 +13,7 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
-import { appPage, loginPage, partnerPage } from "./html.js";
+import { appPage, itemPage, loginPage, partnerPage } from "./html.js";
 import {
   createFileMasterDataRepository,
   DuplicateRecordError,
@@ -296,6 +296,58 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/items") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const items = await masterData.listItems();
+      send(response, 200, itemPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        items,
+        created: url.searchParams.get("created") === "1",
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/items") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const values = Object.fromEntries([
+        "code", "name", "category", "unit", "purchasePrice", "salesPrice", "openingStock", "safetyStock", "taxType", "note",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createItem(values, session.user.id);
+        redirect(response, "/items?created=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof DuplicateRecordError)) throw error;
+        const items = await masterData.listItems();
+        send(response, error.statusCode, itemPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          items,
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error instanceof DuplicateRecordError ? error.message : "필수 항목과 입력 형식을 확인해 주세요.",
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/logout") {
       if (!session) {
         redirect(response, "/login", [serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })], secure);
@@ -319,7 +371,7 @@ export async function createRequestHandler({
       return;
     }
 
-    const knownPath = ["/login", "/app", "/logout", "/healthz"].includes(url.pathname) || Boolean(partnerMatch);
+    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items"].includes(url.pathname) || Boolean(partnerMatch);
     send(
       response,
       knownPath ? 405 : 404,

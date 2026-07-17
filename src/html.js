@@ -106,7 +106,7 @@ const navigation = ({ active }) => `
     <p class="nav-section">기준 정보</p>
     <a class="${active === "sales" ? "active" : ""}" href="/partners/sales"><span aria-hidden="true">↗</span> 판매처</a>
     <a class="${active === "purchases" ? "active" : ""}" href="/partners/purchases"><span aria-hidden="true">↙</span> 구매처</a>
-    <a href="#" aria-disabled="true"><span aria-hidden="true">◇</span> 품목 <em>준비 중</em></a>
+    <a class="${active === "items" ? "active" : ""}" href="/items"><span aria-hidden="true">◇</span> 품목</a>
     <p class="nav-section">업무 관리</p>
     <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
@@ -159,7 +159,7 @@ export function appPage({ user, csrfToken }) {
               <div>
                 <span class="card-label">첫 번째 설정</span>
                 <h2>회사 업무를 시작할 준비가 됐어요.</h2>
-                <p>판매처와 구매처를 구분해 회사의 거래 기준 정보를 등록할 수 있습니다.</p>
+                <p>판매처·구매처와 품목을 등록해 회사의 거래 기준 정보를 준비할 수 있습니다.</p>
               </div>
               <div class="check-seal" aria-hidden="true">✓</div>
             </div>
@@ -294,6 +294,140 @@ export function partnerPage({
           <div class="table-scroll">
             <table>
               <thead><tr><th>코드</th><th>거래처명</th><th>사업자번호</th><th>담당/연락처</th><th>등록일</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>`,
+  });
+}
+
+function formatMoney(value) {
+  return `${Number(value || 0).toLocaleString("ko-KR")}원`;
+}
+
+function formatQuantity(value, unit) {
+  return `${Number(value || 0).toLocaleString("ko-KR", { maximumFractionDigits: 2 })} ${unit}`;
+}
+
+const taxLabels = {
+  taxable: "과세",
+  "zero-rated": "영세",
+  exempt: "면세",
+};
+
+export function itemPage({
+  user,
+  csrfToken,
+  items,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  created = false,
+}) {
+  const rows = items.length
+    ? items.map((item) => `
+      <tr>
+        <td><strong class="record-code">${escapeHtml(item.code)}</strong></td>
+        <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "분류 미등록")}</small></td>
+        <td>${escapeHtml(item.unit)}</td>
+        <td class="number-cell">${escapeHtml(formatMoney(item.purchasePrice))}</td>
+        <td class="number-cell">${escapeHtml(formatMoney(item.salesPrice))}</td>
+        <td class="number-cell"><strong>${escapeHtml(formatQuantity(item.openingStock, item.unit))}</strong><small>안전 ${escapeHtml(formatQuantity(item.safetyStock, item.unit))}</small></td>
+        <td><span class="tax-badge ${escapeHtml(item.taxType)}">${escapeHtml(taxLabels[item.taxType] ?? item.taxType)}</span></td>
+      </tr>`).join("")
+    : `<tr><td colspan="7"><div class="empty-state"><span aria-hidden="true">＋</span><strong>등록된 품목이 없습니다.</strong><p>왼쪽 양식에서 첫 품목을 등록해 보세요.</p></div></td></tr>`;
+
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : created
+      ? `<div class="form-notice success" role="status">품목 등록을 완료했습니다.</div>`
+      : "";
+  const selectedTax = values.taxType || "taxable";
+
+  return workspacePage({
+    title: "품목 관리",
+    active: "items",
+    user,
+    csrfToken,
+    content: `<section class="master-content">
+      <header class="master-heading">
+        <div>
+          <p class="form-kicker">ITEM MASTER</p>
+          <h1>품목 관리</h1>
+          <p>거래에 사용할 상품·제품·원재료의 기준 정보를 관리합니다.</p>
+        </div>
+        <span class="heading-count"><b>${items.length}</b>개 품목 등록됨</span>
+      </header>
+
+      ${notice}
+
+      <div class="master-grid item-master-grid">
+        <section class="master-form-card" aria-labelledby="item-form-title">
+          <div class="card-heading"><span>02</span><div><h2 id="item-form-title">품목 등록</h2><p><b>*</b> 표시는 필수 입력입니다.</p></div></div>
+          <form action="/items" method="post" class="master-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="form-row two-columns">
+              <label>품목 코드 <b>*</b>
+                <input name="code" value="${escapeHtml(values.code)}" placeholder="예: ITEM-001" maxlength="30" required${inputState("code", fieldErrors)}>
+                ${fieldError("code", fieldErrors)}
+              </label>
+              <label>분류
+                <input name="category" value="${escapeHtml(values.category)}" placeholder="예: 완제품, 원재료" maxlength="60">
+              </label>
+            </div>
+            <label>품목명 <b>*</b>
+              <input name="name" value="${escapeHtml(values.name)}" placeholder="상품 또는 자재 이름" maxlength="120" required${inputState("name", fieldErrors)}>
+              ${fieldError("name", fieldErrors)}
+            </label>
+            <div class="form-row three-columns">
+              <label>단위 <b>*</b>
+                <input name="unit" value="${escapeHtml(values.unit)}" placeholder="EA, kg, BOX" maxlength="20" required${inputState("unit", fieldErrors)}>
+                ${fieldError("unit", fieldErrors)}
+              </label>
+              <label>과세 구분 <b>*</b>
+                <select name="taxType"${inputState("taxType", fieldErrors)}>
+                  <option value="taxable"${selectedTax === "taxable" ? " selected" : ""}>과세</option>
+                  <option value="zero-rated"${selectedTax === "zero-rated" ? " selected" : ""}>영세</option>
+                  <option value="exempt"${selectedTax === "exempt" ? " selected" : ""}>면세</option>
+                </select>
+                ${fieldError("taxType", fieldErrors)}
+              </label>
+              <span class="form-hint">부가세 신고 기준</span>
+            </div>
+            <div class="form-row two-columns">
+              <label>매입 단가
+                <span class="money-input"><input name="purchasePrice" type="number" value="${escapeHtml(values.purchasePrice)}" placeholder="0" min="0" max="999999999999" step="1" inputmode="numeric"${inputState("purchasePrice", fieldErrors)}><i>원</i></span>
+                ${fieldError("purchasePrice", fieldErrors)}
+              </label>
+              <label>판매 단가
+                <span class="money-input"><input name="salesPrice" type="number" value="${escapeHtml(values.salesPrice)}" placeholder="0" min="0" max="999999999999" step="1" inputmode="numeric"${inputState("salesPrice", fieldErrors)}><i>원</i></span>
+                ${fieldError("salesPrice", fieldErrors)}
+              </label>
+            </div>
+            <div class="form-row two-columns">
+              <label>기초 재고
+                <input name="openingStock" type="number" value="${escapeHtml(values.openingStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("openingStock", fieldErrors)}>
+                ${fieldError("openingStock", fieldErrors)}
+              </label>
+              <label>안전 재고
+                <input name="safetyStock" type="number" value="${escapeHtml(values.safetyStock)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState("safetyStock", fieldErrors)}>
+                ${fieldError("safetyStock", fieldErrors)}
+              </label>
+            </div>
+            <label>메모
+              <textarea name="note" placeholder="품목 사양 등 참고할 내용을 입력하세요" maxlength="500">${escapeHtml(values.note)}</textarea>
+            </label>
+            <button type="submit" class="primary-action">품목 등록 <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
+
+        <section class="master-list-card" aria-labelledby="item-list-title">
+          <div class="list-heading"><div><p>REGISTERED</p><h2 id="item-list-title">품목 목록</h2></div><strong>${items.length}<small>개</small></strong></div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>코드</th><th>품목명</th><th>단위</th><th>매입 단가</th><th>판매 단가</th><th>재고</th><th>과세</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>
