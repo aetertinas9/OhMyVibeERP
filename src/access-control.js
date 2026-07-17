@@ -22,6 +22,7 @@ export const PERMISSIONS = Object.freeze({
   PURCHASE_RECEIVE: "purchase.receive",
   PURCHASE_RETURN: "purchase.return",
   INVENTORY_VIEW: "inventory.view",
+  INVENTORY_TRANSFER: "inventory.transfer",
   PRODUCTION_MANAGE: "production.manage",
   FINANCE_REPORT: "finance.report",
   FINANCE_CLOSE: "finance.close",
@@ -61,6 +62,7 @@ const departmentPermissions = Object.freeze({
     PERMISSIONS.SALES_SHIP,
     PERMISSIONS.SALES_RETURN,
     PERMISSIONS.INVENTORY_VIEW,
+    PERMISSIONS.INVENTORY_TRANSFER,
   ]),
   finance: new Set([
     PERMISSIONS.HOME,
@@ -96,6 +98,7 @@ export function permissionForRequest(method, pathname) {
   if (pathname === "/partners/purchases") return PERMISSIONS.PURCHASE_PARTNERS;
   if (pathname === "/items") return PERMISSIONS.ITEMS_MANAGE;
   if (pathname === "/inventory") return PERMISSIONS.INVENTORY_VIEW;
+  if (pathname === "/inventory/transfers") return PERMISSIONS.INVENTORY_TRANSFER;
   if (pathname === "/purchase-orders") {
     return method === "POST" ? PERMISSIONS.PURCHASE_ORDERS_CREATE : PERMISSIONS.PURCHASE_ORDERS_VIEW;
   }

@@ -437,16 +437,70 @@ export async function createRequestHandler({
         redirect(response, "/login", [], secure);
         return;
       }
-      const items = await masterData.listItems();
+      const [items, transfers] = await Promise.all([
+        masterData.listItems(),
+        masterData.listInventoryTransfers(),
+      ]);
       send(response, 200, inventoryPage({
         user: session.user,
         csrfToken: session.csrfToken,
         items,
+        transfers,
         warehouses: WAREHOUSES,
+        values: { sourceWarehouseId: "seoul", destinationWarehouseId: "busan", transferDate: today() },
+        transferred: url.searchParams.get("transferred") === "1",
       }), {
         "Cache-Control": "no-store",
         "Content-Type": "text/html; charset=utf-8",
       }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/inventory/transfers") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const itemIds = form.getAll("lineItemId");
+      const quantities = form.getAll("lineQuantity");
+      const values = {
+        sourceWarehouseId: form.get("sourceWarehouseId") ?? "",
+        destinationWarehouseId: form.get("destinationWarehouseId") ?? "",
+        transferDate: form.get("transferDate") ?? "",
+        note: form.get("note") ?? "",
+        lines: Array.from({ length: Math.max(itemIds.length, quantities.length) }, (_, index) => ({
+          itemId: itemIds[index] ?? "",
+          quantity: quantities[index] ?? "",
+        })),
+      };
+      try {
+        await masterData.createInventoryTransfer(values, session.user.id);
+        redirect(response, "/inventory?transferred=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
+        const [items, transfers] = await Promise.all([
+          masterData.listItems(),
+          masterData.listInventoryTransfers(),
+        ]);
+        send(response, error.statusCode, inventoryPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          items,
+          transfers,
+          warehouses: WAREHOUSES,
+          values,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
       return;
     }
 
@@ -1174,7 +1228,7 @@ export async function createRequestHandler({
     }
 
     const knownPath = [
-      "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
+      "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/inventory/transfers", "/purchase-orders", "/sales-orders",
       "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/monthly/close", "/employees", "/payroll",
       "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);

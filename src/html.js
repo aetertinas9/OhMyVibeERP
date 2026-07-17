@@ -538,7 +538,21 @@ export function itemPage({
   });
 }
 
-export function inventoryPage({ user, csrfToken, items, warehouses }) {
+export function inventoryPage({
+  user,
+  csrfToken,
+  items,
+  warehouses,
+  transfers = [],
+  values = {},
+  fieldErrors = {},
+  error = "",
+  transferred = false,
+}) {
+  const canTransfer = canAccess(user, PERMISSIONS.INVENTORY_TRANSFER);
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const transferLines = Array.from({ length: 6 }, (_, index) => values.lines?.[index] ?? {});
   const warehouseItemCounts = Object.fromEntries(warehouses.map(({ id }) => [
     id,
     items.filter((item) => Number(item.stockByWarehouse[id] || 0) > 0).length,
@@ -562,6 +576,32 @@ export function inventoryPage({ user, csrfToken, items, warehouses }) {
       </tr>`;
     }).join("")
     : `<tr><td colspan="6"><div class="empty-state"><span aria-hidden="true">◇</span><strong>재고를 확인할 품목이 없습니다.</strong><p>품목 관리에서 창고별 기초 재고를 등록해 주세요.</p></div></td></tr>`;
+  const warehouseOptions = (selectedId) => warehouses.map((warehouse) => (
+    `<option value="${escapeHtml(warehouse.id)}"${selectedId === warehouse.id ? " selected" : ""}>${escapeHtml(warehouse.name)}</option>`
+  )).join("");
+  const itemOptions = (selectedId) => items.map((item) => (
+    `<option value="${escapeHtml(item.id)}"${selectedId === item.id ? " selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)} (${warehouses.map((warehouse) => `${warehouse.location} ${formatQuantity(item.stockByWarehouse[warehouse.id], item.unit)}`).join(" · ")})</option>`
+  )).join("");
+  const transferRows = transfers.map((transfer) => {
+    const source = warehouseMap.get(transfer.sourceWarehouseId);
+    const destination = warehouseMap.get(transfer.destinationWarehouseId);
+    const lineDetails = transfer.lines.map((line) => {
+      const item = itemMap.get(line.itemId);
+      return `<div><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><span>${escapeHtml(item?.code ?? line.itemId)} · ${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))}</span></div>`;
+    }).join("");
+    return `<tr data-inventory-transfer="${escapeHtml(transfer.number)}">
+      <td><strong class="record-code">${escapeHtml(transfer.number)}</strong><small>${escapeHtml(formatKoreanDateTime(transfer.transferredAt))}</small></td>
+      <td><strong>${escapeHtml(formatDate(transfer.transferDate))}</strong></td>
+      <td><span class="transfer-route"><b>${escapeHtml(source?.name ?? transfer.sourceWarehouseId)}</b><i aria-hidden="true">→</i><b>${escapeHtml(destination?.name ?? transfer.destinationWarehouseId)}</b></span></td>
+      <td class="transfer-line-details">${lineDetails}</td>
+      <td>${escapeHtml(transfer.note || "이동 메모 없음")}</td>
+    </tr>`;
+  }).join("");
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : transferred
+      ? `<div class="form-notice success" role="status">창고 이동을 완료해 출발·도착 재고를 함께 반영했습니다.</div>`
+      : "";
 
   return workspacePage({
     title: "재고 현황",
@@ -578,6 +618,26 @@ export function inventoryPage({ user, csrfToken, items, warehouses }) {
         <div class="inventory-total"><span>등록 품목</span><strong>${escapeHtml(items.length)}<small>개</small></strong></div>
       </header>
 
+      ${notice}
+
+      ${canTransfer ? `<details class="inventory-transfer-create"${!transfers.length || error ? " open" : ""}>
+        <summary><span><i>MOVE</i><strong>창고 간 재고 이동</strong></span><em>출발 차감 · 도착 증가 동시 처리</em></summary>
+        <form action="/inventory/transfers" method="post" class="inventory-transfer-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <div class="transfer-form-header">
+            <label>출발 창고 <b>*</b><select name="sourceWarehouseId" required${inputState("sourceWarehouseId", fieldErrors)}><option value="">출발 창고 선택</option>${warehouseOptions(values.sourceWarehouseId)}</select>${fieldError("sourceWarehouseId", fieldErrors)}</label>
+            <span class="transfer-direction" aria-hidden="true">→</span>
+            <label>도착 창고 <b>*</b><select name="destinationWarehouseId" required${inputState("destinationWarehouseId", fieldErrors)}><option value="">도착 창고 선택</option>${warehouseOptions(values.destinationWarehouseId)}</select>${fieldError("destinationWarehouseId", fieldErrors)}</label>
+            <label>이동일 <b>*</b><input name="transferDate" type="date" value="${escapeHtml(values.transferDate)}" required${inputState("transferDate", fieldErrors)}>${fieldError("transferDate", fieldErrors)}</label>
+          </div>
+          ${fieldErrors.lines ? `<div class="inline-error">${escapeHtml(fieldErrors.lines)}</div>` : ""}
+          <div class="transfer-lines"><div class="transfer-line transfer-line-head"><span>이동 품목</span><span>수량</span></div>
+            ${transferLines.map((line, index) => `<div class="transfer-line"><label><span class="sr-only">${index + 1}번 이동 품목</span><select name="lineItemId"${inputState(`line${index}ItemId`, fieldErrors)}><option value="">품목 선택</option>${itemOptions(line.itemId)}</select>${fieldError(`line${index}ItemId`, fieldErrors)}</label><label><span class="sr-only">${index + 1}번 이동 수량</span><input name="lineQuantity" type="number" value="${escapeHtml(line.quantity)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState(`line${index}Quantity`, fieldErrors)}>${fieldError(`line${index}Quantity`, fieldErrors)}</label></div>`).join("")}
+          </div>
+          <div class="transfer-form-footer"><input name="note" value="${escapeHtml(values.note)}" placeholder="운송·이동 메모 (선택)" maxlength="300"><button type="submit"${!items.length ? " disabled" : ""}>이동 처리 <span aria-hidden="true">→</span></button></div>
+        </form>
+      </details>` : `<aside class="inventory-transfer-role-note"><span aria-hidden="true">i</span><p><strong>창고 이동 처리는 물류 부서 업무입니다.</strong> 현재고와 이동 이력은 조회할 수 있습니다.</p></aside>`}
+
       <div class="warehouse-grid">${warehouseCards}</div>
 
       <section class="inventory-table-card" aria-labelledby="inventory-list-title">
@@ -588,6 +648,11 @@ export function inventoryPage({ user, csrfToken, items, warehouses }) {
             <tbody>${rows}</tbody>
           </table>
         </div>
+      </section>
+
+      <section class="inventory-table-card inventory-transfer-history" aria-labelledby="inventory-transfer-history-title">
+        <div class="list-heading"><div><p>TRANSFER HISTORY</p><h2 id="inventory-transfer-history-title">창고 이동 이력</h2></div><strong>${transfers.length}<small>건 이동</small></strong></div>
+        ${transferRows ? `<div class="table-scroll"><table><thead><tr><th>이동 번호·처리 시각</th><th>이동일</th><th>출발 → 도착</th><th>품목·수량</th><th>메모</th></tr></thead><tbody>${transferRows}</tbody></table></div>` : `<div class="inventory-transfer-empty"><span aria-hidden="true">⇄</span><strong>창고 이동 이력이 없습니다.</strong><p>물류 담당자가 이동을 처리하면 양쪽 재고와 근거가 여기에 함께 남습니다.</p></div>`}
       </section>
     </section>`,
   });
