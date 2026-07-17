@@ -110,6 +110,7 @@ const navigation = ({ active }) => `
     <p class="nav-section">업무 관리</p>
     <a class="${active === "sales-orders" ? "active" : ""}" href="/sales-orders"><span aria-hidden="true">↗</span> 주문 · 출고</a>
     <a class="${active === "purchase-orders" ? "active" : ""}" href="/purchase-orders"><span aria-hidden="true">▦</span> 발주 관리</a>
+    <a class="${active === "production" ? "active" : ""}" href="/production"><span aria-hidden="true">⚙</span> 생산 관리</a>
     <a class="${active === "inventory" ? "active" : ""}" href="/inventory"><span aria-hidden="true">▤</span> 재고 현황</a>
     <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
   </nav>`;
@@ -762,6 +763,122 @@ export function salesOrdersPage({
       </details>
 
       <section class="orders-section"><div class="orders-title"><p>ORDER & SHIPMENT</p><h2>주문·출고 현황</h2></div>${orderCards}</section>
+    </section>`,
+  });
+}
+
+export function productionPage({
+  user,
+  csrfToken,
+  items,
+  warehouses,
+  bills,
+  productionOrders,
+  bomValues = {},
+  productionValues = {},
+  fieldErrors = {},
+  error = "",
+  errorForm = "",
+  bomCreated = false,
+  produced = false,
+}) {
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const bomByProduct = new Map(bills.map((bill) => [bill.productItemId, bill]));
+  const componentRows = Array.from({ length: 6 }, (_, index) => bomValues.components?.[index] ?? {});
+  const bomErrors = errorForm === "bom" ? fieldErrors : {};
+  const productionErrors = errorForm === "production" ? fieldErrors : {};
+  const itemOptions = (selectedId, { onlyProductsWithBom = false } = {}) => items
+    .filter((item) => !onlyProductsWithBom || bomByProduct.has(item.id))
+    .map((item) => (
+      `<option value="${escapeHtml(item.id)}"${selectedId === item.id ? " selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)} (${escapeHtml(item.unit)})</option>`
+    )).join("");
+
+  const billCards = bills.length
+    ? bills.map((bill) => {
+      const product = itemMap.get(bill.productItemId);
+      const componentTableRows = bill.components.map((component) => {
+        const item = itemMap.get(component.itemId);
+        const warehouseStocks = warehouses.map(({ id }) => (
+          `<td>${escapeHtml(formatQuantity(item?.stockByWarehouse?.[id] ?? 0, item?.unit ?? ""))}</td>`
+        )).join("");
+        return `<tr><td><strong>${escapeHtml(item?.name ?? "삭제된 부품")}</strong><small>${escapeHtml(item?.code ?? component.itemId)}</small></td><td><strong>${escapeHtml(formatQuantity(component.quantity, item?.unit ?? ""))}</strong></td>${warehouseStocks}</tr>`;
+      }).join("");
+      return `<article class="purchase-order-card bom-card">
+        <header><div><span class="order-number">BILL OF MATERIALS</span><h2>${escapeHtml(product?.name ?? "삭제된 완제품")}</h2><p>${escapeHtml(product?.code ?? bill.productItemId)} · 완제품 1 ${escapeHtml(product?.unit ?? "")}</p></div><span class="order-status received">구성 완료</span></header>
+        <div class="table-scroll"><table class="order-lines-table bom-table"><thead><tr><th>부품</th><th>제품 1개당 필요</th>${warehouses.map(({ name }) => `<th>${escapeHtml(name)} 현재고</th>`).join("")}</tr></thead><tbody>${componentTableRows}</tbody></table></div>
+        <div class="order-total"><span>${escapeHtml(bill.note || "구성 메모 없음")}</span><p>구성 부품 <strong>${bill.components.length}종</strong></p></div>
+      </article>`;
+    }).join("")
+    : `<div class="order-empty"><span aria-hidden="true">⚙</span><h2>등록된 부품 구성표가 없습니다.</h2><p>완제품과 제품 1개당 필요한 부품 수량을 먼저 등록하세요.</p></div>`;
+
+  const productionCards = productionOrders.length
+    ? productionOrders.map((order) => {
+      const product = itemMap.get(order.productItemId);
+      const warehouse = warehouseMap.get(order.warehouseId);
+      const consumedRows = order.components.map((component) => {
+        const item = itemMap.get(component.itemId);
+        return `<tr><td><strong>${escapeHtml(item?.name ?? "삭제된 부품")}</strong><small>${escapeHtml(item?.code ?? component.itemId)}</small></td><td>${escapeHtml(formatQuantity(component.quantityPerProduct, item?.unit ?? ""))}</td><td><strong class="consumed-quantity">-${escapeHtml(formatQuantity(component.consumedQuantity, item?.unit ?? ""))}</strong></td></tr>`;
+      }).join("");
+      return `<article class="purchase-order-card production-order-card">
+        <header><div><span class="order-number">${escapeHtml(order.number)}</span><h2>${escapeHtml(product?.name ?? "삭제된 완제품")}</h2><p>${escapeHtml(warehouse?.name ?? order.warehouseId)}에서 생산</p></div><div class="order-meta"><span class="order-status received">생산 완료</span><dl><div><dt>생산일</dt><dd>${escapeHtml(formatDate(order.productionDate))}</dd></div><div><dt>완료 시각</dt><dd>${escapeHtml(formatDate(order.completedAt))}</dd></div></dl></div></header>
+        <div class="production-result"><div><span>완제품 입고</span><strong>+${escapeHtml(formatQuantity(order.quantity, product?.unit ?? ""))}</strong></div><p>생산 지시와 동시에 부품 출고 및 완제품 입고가 반영되었습니다.</p></div>
+        <div class="table-scroll"><table class="order-lines-table production-components-table"><thead><tr><th>사용 부품</th><th>제품 1개당</th><th>총 차감 수량</th></tr></thead><tbody>${consumedRows}</tbody></table></div>
+        <div class="order-total"><span>${escapeHtml(order.note || "생산 메모 없음")}</span><p>${escapeHtml(warehouse?.name ?? "")}</p></div>
+      </article>`;
+    }).join("")
+    : `<div class="order-empty"><span aria-hidden="true">◇</span><h2>생산 지시 이력이 없습니다.</h2><p>구성표가 등록된 완제품을 선택해 첫 생산을 지시하세요.</p></div>`;
+
+  const notice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : bomCreated
+      ? `<div class="form-notice success" role="status">완제품 부품 구성표를 등록했습니다.</div>`
+      : produced
+        ? `<div class="form-notice success" role="status">생산을 완료하고 부품·완제품 재고에 반영했습니다.</div>`
+        : "";
+
+  return workspacePage({
+    title: "생산 관리",
+    active: "production",
+    user,
+    csrfToken,
+    content: `<section class="purchase-content production-content">
+      <header class="purchase-heading"><div><p class="form-kicker">MANUFACTURING</p><h1>생산 관리</h1><p>부품 구성표를 기준으로 생산하고 창고 재고를 한 번에 반영합니다.</p></div><div class="production-summary"><span><b>${bills.length}</b>개 구성표</span><span><b>${productionOrders.length}</b>건 생산</span></div></header>
+      ${notice}
+      ${items.length < 2 ? `<div class="prerequisite-notice"><strong>생산 전에 품목 기준정보가 필요합니다.</strong><p>완제품과 부품을 포함해 품목을 2개 이상 등록해 주세요.</p></div>` : ""}
+
+      <div class="production-forms">
+        <details class="purchase-create bom-create"${!bills.length || errorForm === "bom" ? " open" : ""}>
+          <summary><span><i>BOM</i><strong>부품 구성표 등록</strong></span><em>완제품 1개당 부품 소요량</em></summary>
+          <form action="/production/boms" method="post" class="purchase-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="bom-product-field"><label>완제품 <b>*</b><select name="productItemId" required${inputState("productItemId", bomErrors)}><option value="">완제품 선택</option>${itemOptions(bomValues.productItemId)}</select>${fieldError("productItemId", bomErrors)}</label><p>등록된 모든 품목 중 조립 결과로 입고할 완제품을 선택하세요.</p></div>
+            ${bomErrors.components ? `<div class="inline-error">${escapeHtml(bomErrors.components)}</div>` : ""}
+            <div class="po-lines bom-lines"><div class="po-line bom-line po-line-head"><span>부품</span><span>제품 1개당 필요 수량</span></div>
+              ${componentRows.map((component, index) => `<div class="po-line bom-line"><label><span class="sr-only">${index + 1}번 부품</span><select name="componentItemId"${inputState(`component${index}ItemId`, bomErrors)}><option value="">부품 선택</option>${itemOptions(component.itemId)}</select>${fieldError(`component${index}ItemId`, bomErrors)}</label><label><span class="sr-only">${index + 1}번 필요 수량</span><input name="componentQuantity" type="number" value="${escapeHtml(component.quantity)}" placeholder="0" min="0" max="999999999" step="0.01" inputmode="decimal"${inputState(`component${index}Quantity`, bomErrors)}>${fieldError(`component${index}Quantity`, bomErrors)}</label></div>`).join("")}
+            </div>
+            <div class="purchase-form-footer"><input name="note" value="${escapeHtml(bomValues.note)}" placeholder="구성 메모 (선택)" maxlength="500"><button type="submit"${items.length < 2 ? " disabled" : ""}>구성표 등록 <span aria-hidden="true">→</span></button></div>
+          </form>
+        </details>
+
+        <details class="purchase-create production-create"${errorForm === "production" || bills.length && !productionOrders.length ? " open" : ""}>
+          <summary><span><i>MO</i><strong>생산 지시</strong></span><em>부품 차감 · 완제품 입고</em></summary>
+          <form action="/production/orders" method="post" class="purchase-form">
+            <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+            <div class="purchase-form-header production-form-header">
+              <label>완제품 <b>*</b><select name="productItemId" required${inputState("productItemId", productionErrors)}><option value="">구성표가 있는 완제품 선택</option>${itemOptions(productionValues.productItemId, { onlyProductsWithBom: true })}</select>${fieldError("productItemId", productionErrors)}</label>
+              <label>생산 창고 <b>*</b><select name="warehouseId" required${inputState("warehouseId", productionErrors)}><option value="">창고 선택</option>${warehouses.map((warehouse) => `<option value="${escapeHtml(warehouse.id)}"${productionValues.warehouseId === warehouse.id ? " selected" : ""}>${escapeHtml(warehouse.name)}</option>`).join("")}</select>${fieldError("warehouseId", productionErrors)}</label>
+              <label>생산일 <b>*</b><input name="productionDate" type="date" value="${escapeHtml(productionValues.productionDate)}" required${inputState("productionDate", productionErrors)}>${fieldError("productionDate", productionErrors)}</label>
+              <label>생산 수량 <b>*</b><input name="quantity" type="number" value="${escapeHtml(productionValues.quantity)}" placeholder="0" min="1" max="999999999" step="1" inputmode="numeric" required${inputState("quantity", productionErrors)}>${fieldError("quantity", productionErrors)}</label>
+            </div>
+            <div class="production-warning"><strong>생산 지시 즉시 재고가 변동됩니다.</strong><span>선택 창고에서 필요한 모든 부품을 차감하고 완제품을 입고합니다.</span></div>
+            <div class="purchase-form-footer"><input name="note" value="${escapeHtml(productionValues.note)}" placeholder="생산 메모 (선택)" maxlength="500"><button type="submit"${!bills.length ? " disabled" : ""}>생산 지시 <span aria-hidden="true">→</span></button></div>
+          </form>
+        </details>
+      </div>
+
+      <section class="orders-section production-section"><div class="orders-title"><p>PRODUCT STRUCTURE</p><h2>완제품별 부품 구성</h2></div>${billCards}</section>
+      <section class="orders-section production-section"><div class="orders-title"><p>PRODUCTION HISTORY</p><h2>생산·재고 반영 이력</h2></div>${productionCards}</section>
     </section>`,
   });
 }

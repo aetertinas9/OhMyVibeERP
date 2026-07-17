@@ -13,7 +13,16 @@ import {
   SESSION_COOKIE,
   SessionStore,
 } from "./auth.js";
-import { appPage, inventoryPage, itemPage, loginPage, partnerPage, purchaseOrdersPage, salesOrdersPage } from "./html.js";
+import {
+  appPage,
+  inventoryPage,
+  itemPage,
+  loginPage,
+  partnerPage,
+  productionPage,
+  purchaseOrdersPage,
+  salesOrdersPage,
+} from "./html.js";
 import {
   BusinessRuleError,
   createFileMasterDataRepository,
@@ -144,6 +153,14 @@ export async function createRequestHandler({
       masterData.listSalesOrders(),
     ]);
     return { customers, items, orders };
+  };
+  const productionViewData = async () => {
+    const [items, bills, productionOrders] = await Promise.all([
+      masterData.listItems(),
+      masterData.listBillsOfMaterials(),
+      masterData.listProductionOrders(),
+    ]);
+    return { items, bills, productionOrders };
   };
   const today = () => new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
@@ -612,6 +629,107 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/production") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const view = await productionViewData();
+      send(response, 200, productionPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        warehouses: WAREHOUSES,
+        productionValues: { productionDate: today() },
+        bomCreated: url.searchParams.get("bomCreated") === "1",
+        produced: url.searchParams.get("produced") === "1",
+        ...view,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/production/boms") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const itemIds = form.getAll("componentItemId");
+      const quantities = form.getAll("componentQuantity");
+      const bomValues = {
+        productItemId: form.get("productItemId") ?? "",
+        note: form.get("note") ?? "",
+        components: Array.from({ length: Math.max(itemIds.length, quantities.length) }, (_, index) => ({
+          itemId: itemIds[index] ?? "",
+          quantity: quantities[index] ?? "",
+        })),
+      };
+      try {
+        await masterData.createBillOfMaterials(bomValues, session.user.id);
+        redirect(response, "/production?bomCreated=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof DuplicateRecordError)) throw error;
+        const view = await productionViewData();
+        send(response, error.statusCode, productionPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          bomValues,
+          productionValues: { productionDate: today() },
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          errorForm: "bom",
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/production/orders") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const productionValues = Object.fromEntries([
+        "productItemId", "warehouseId", "productionDate", "quantity", "note",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        await masterData.createProductionOrder(productionValues, session.user.id);
+        redirect(response, "/production?produced=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof InputValidationError) && !(error instanceof BusinessRuleError)) throw error;
+        const view = await productionViewData();
+        send(response, error.statusCode, productionPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          warehouses: WAREHOUSES,
+          productionValues,
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+          errorForm: "production",
+          ...view,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/logout") {
       if (!session) {
         redirect(response, "/login", [serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })], secure);
@@ -635,7 +753,10 @@ export async function createRequestHandler({
       return;
     }
 
-    const knownPath = ["/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders"].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch);
+    const knownPath = [
+      "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/purchase-orders", "/sales-orders",
+      "/production", "/production/boms", "/production/orders",
+    ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch);
     send(
       response,
       knownPath ? 405 : 404,
