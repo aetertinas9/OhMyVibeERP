@@ -27,7 +27,7 @@ const document = ({ title, body, pageClass = "" }) => `<!doctype html>
   </body>
 </html>`;
 
-export function loginPage({ csrfToken = "", error = "", username = "" } = {}) {
+export function loginPage({ csrfToken = "", error = "", username = "", showDemoAccount = true } = {}) {
   const message = error
     ? `<div class="alert" role="alert"><span aria-hidden="true">!</span><p>${escapeHtml(error)}</p></div>`
     : "";
@@ -88,14 +88,71 @@ export function loginPage({ csrfToken = "", error = "", username = "" } = {}) {
               <button type="submit">로그인 <span aria-hidden="true">→</span></button>
             </form>
 
-            <aside class="demo-account" aria-label="체험 계정 안내">
+            ${showDemoAccount ? `<aside class="demo-account" aria-label="체험 계정 안내">
               <span>DEMO</span>
               <p><strong>체험 계정</strong><br><code>admin</code> / <code>ChangeMe123!</code></p>
-            </aside>
+            </aside>` : ""}
             <p class="help-text">로그인에 문제가 있나요? <a href="mailto:help@daon.example">관리자에게 문의</a></p>
           </div>
         </section>
       </main>`,
+  });
+}
+
+export function appPage({ user, csrfToken }) {
+  return document({
+    title: "홈 | 다온 ERP",
+    pageClass: "app-page",
+    body: `
+      <div class="app-shell">
+        <aside class="sidebar">
+          <a class="brand sidebar-brand" href="/app" aria-label="다온 ERP 홈">
+            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>DAON <b>ERP</b></span>
+          </a>
+          <nav aria-label="주 메뉴">
+            <p>WORKSPACE</p>
+            <a class="active" href="/app"><span aria-hidden="true">⌂</span> 홈</a>
+            <a href="#" aria-disabled="true"><span aria-hidden="true">▦</span> 매출 · 매입 <em>준비 중</em></a>
+            <a href="#" aria-disabled="true"><span aria-hidden="true">▤</span> 재고 관리 <em>준비 중</em></a>
+            <a href="#" aria-disabled="true"><span aria-hidden="true">♙</span> 인사 · 급여 <em>준비 중</em></a>
+          </nav>
+          <div class="sidebar-user">
+            <span class="avatar">${escapeHtml(user.displayName.slice(0, 1))}</span>
+            <div><strong>${escapeHtml(user.displayName)}</strong><small>${escapeHtml(user.role)}</small></div>
+          </div>
+        </aside>
+
+        <main class="workspace">
+          <header class="topbar">
+            <div><span class="status-dot"></span> 시스템 정상</div>
+            <form action="/logout" method="post">
+              <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+              <button type="submit">로그아웃</button>
+            </form>
+          </header>
+          <section class="workspace-content">
+            <p class="form-kicker">TODAY'S WORKSPACE</p>
+            <h1>${escapeHtml(user.displayName)}님, 안녕하세요.</h1>
+            <p class="workspace-intro">다온 ERP에 안전하게 로그인했습니다.</p>
+
+            <div class="welcome-card">
+              <div>
+                <span class="card-label">첫 번째 설정</span>
+                <h2>회사 업무를 시작할 준비가 됐어요.</h2>
+                <p>다음 단계에서 매출·매입, 재고, 인사 기능을 하나씩 연결할 수 있습니다.</p>
+              </div>
+              <div class="check-seal" aria-hidden="true">✓</div>
+            </div>
+
+            <div class="summary-grid" aria-label="업무 요약">
+              <article><span>오늘 매출</span><strong>—</strong><small>데이터 연결 전</small></article>
+              <article><span>처리할 주문</span><strong>—</strong><small>데이터 연결 전</small></article>
+              <article><span>재고 알림</span><strong>—</strong><small>데이터 연결 전</small></article>
+            </div>
+          </section>
+        </main>
+      </div>`,
   });
 }
 
