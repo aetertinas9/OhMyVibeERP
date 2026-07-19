@@ -998,7 +998,7 @@ export function employeePage({
             <label>이메일 <b>*</b><input name="email" type="email" value="${escapeHtml(values.email)}" placeholder="employee@company.example" maxlength="120" required${inputState("email", fieldErrors)}>${fieldError("email", fieldErrors)}</label>
             <label>고용 형태 <b>*</b><select name="employmentType"${inputState("employmentType", fieldErrors)}>${Object.entries(employmentTypeLabels).map(([value, label]) => `<option value="${value}"${values.employmentType === value ? " selected" : ""}>${label}</option>`).join("")}</select>${fieldError("employmentType", fieldErrors)}</label>
           </div></fieldset>
-          <fieldset><legend>월 급여 기준</legend><p>법정 공제는 자동 계산하지 않습니다. 회사에서 확인한 월 고정 공제 총액을 등록하세요.</p><div class="employee-form-grid salary">
+          <fieldset><legend>월 급여 기준</legend><p>소득세·4대 보험은 급여 확정 시 자동 추정 공제됩니다. 여기에는 그 외 회사 고정 공제(상조회비 등) 총액만 등록하세요.</p><div class="employee-form-grid salary">
             <label>월 기본급 <b>*</b><span class="money-input"><input name="baseSalary" type="number" value="${escapeHtml(values.baseSalary)}" min="1" max="999999999999" step="1" required${inputState("baseSalary", fieldErrors)}><i>원</i></span>${fieldError("baseSalary", fieldErrors)}</label>
             <label>식대<span class="money-input"><input name="mealAllowance" type="number" value="${escapeHtml(values.mealAllowance)}" min="0" max="999999999999" step="1"${inputState("mealAllowance", fieldErrors)}><i>원</i></span>${fieldError("mealAllowance", fieldErrors)}</label>
             <label>기타 수당<span class="money-input"><input name="otherAllowance" type="number" value="${escapeHtml(values.otherAllowance)}" min="0" max="999999999999" step="1"${inputState("otherAllowance", fieldErrors)}><i>원</i></span>${fieldError("otherAllowance", fieldErrors)}</label>
@@ -1030,21 +1030,29 @@ export function payrollPage({
   const activeEmployees = employees.filter(({ employmentStatus }) => employmentStatus === "active");
   const eligibleEmployees = activeEmployees.filter(({ hireDate }) => !values.payDate || hireDate <= values.payDate);
   const runCards = runs.map((run, runIndex) => {
-    const lineRows = run.lines.map((line) => `<tr data-payroll-line>
+    const legacyRun = run.totalStatutoryDeduction === undefined;
+    const lineRows = run.lines.map((line) => {
+      const legacyLine = line.statutoryDeduction === undefined;
+      const withholding = legacyLine ? null : line.incomeTax + line.localIncomeTax;
+      const insurance = legacyLine
+        ? null
+        : line.nationalPension + line.healthInsurance + line.longTermCareInsurance + line.employmentInsurance;
+      return `<tr data-payroll-line>
       <td><strong class="record-code">${escapeHtml(line.employeeNumber)}</strong></td>
       <td><strong>${escapeHtml(line.name)}</strong><small>${escapeHtml(line.department)} · ${escapeHtml(line.position)}</small></td>
-      <td class="number-cell">${escapeHtml(formatMoney(line.baseSalary))}</td>
-      <td class="number-cell">${escapeHtml(formatMoney(line.mealAllowance + line.otherAllowance))}</td>
       <td class="number-cell"><strong>${escapeHtml(formatMoney(line.grossPay))}</strong></td>
+      <td class="number-cell deduction-cell">${legacyLine ? "—" : `-${escapeHtml(formatMoney(withholding))}`}</td>
+      <td class="number-cell deduction-cell">${legacyLine ? "—" : `-${escapeHtml(formatMoney(insurance))}`}</td>
       <td class="number-cell deduction-cell">-${escapeHtml(formatMoney(line.fixedDeduction))}</td>
       <td class="number-cell net-pay-cell"><strong>${escapeHtml(formatMoney(line.netPay))}</strong></td>
       <td><a class="statement-link" href="/payroll/${escapeHtml(run.id)}/statements?employee=${escapeHtml(line.employeeId)}" target="_blank" rel="noopener">개인 명세</a></td>
-    </tr>`).join("");
+    </tr>`;
+    }).join("");
     const [year, month] = run.payPeriod.split("-").map(Number);
     return `<article class="payroll-run-card">
       <header><div><span class="order-number">${escapeHtml(run.number)}</span><h2>${year}년 ${month}월 급여대장</h2><p>급여일 ${escapeHtml(formatDate(run.payDate))} · ${run.employeeCount.toLocaleString("ko-KR")}명</p></div><div class="payroll-run-actions"><span class="order-status received">확정</span><a href="/payroll/${escapeHtml(run.id)}/statements" target="_blank" rel="noopener">${run.employeeCount.toLocaleString("ko-KR")}명 명세서 전체 출력</a></div></header>
-      <div class="payroll-totals"><div><span>지급 합계</span><strong>${escapeHtml(formatMoney(run.totalGrossPay))}</strong></div><div><span>공제 합계</span><strong>${escapeHtml(formatMoney(run.totalDeduction))}</strong></div><div><span>실지급 합계</span><strong>${escapeHtml(formatMoney(run.totalNetPay))}</strong></div></div>
-      <details class="payroll-lines"${runIndex === 0 ? " open" : ""}><summary>직원별 급여 내역 ${run.employeeCount.toLocaleString("ko-KR")}건 보기</summary><div class="table-scroll"><table><thead><tr><th>직원번호</th><th>직원</th><th>기본급</th><th>수당</th><th>지급 합계</th><th>등록 공제</th><th>실지급액</th><th>출력</th></tr></thead><tbody>${lineRows}</tbody></table></div></details>
+      <div class="payroll-totals"><div><span>지급 합계</span><strong>${escapeHtml(formatMoney(run.totalGrossPay))}</strong></div><div><span>법정 공제 합계(추정)</span><strong>${legacyRun ? "확정 당시 미계산" : escapeHtml(formatMoney(run.totalStatutoryDeduction))}</strong></div><div><span>등록 공제 합계</span><strong>${escapeHtml(formatMoney(legacyRun ? run.totalDeduction : run.totalFixedDeduction))}</strong></div><div><span>실지급 합계</span><strong>${escapeHtml(formatMoney(run.totalNetPay))}</strong></div></div>
+      <details class="payroll-lines"${runIndex === 0 ? " open" : ""}><summary>직원별 급여 내역 ${run.employeeCount.toLocaleString("ko-KR")}건 보기</summary><div class="table-scroll"><table><thead><tr><th>직원번호</th><th>직원</th><th>지급 합계</th><th>소득세·지방세</th><th>4대 보험</th><th>등록 공제</th><th>실지급액</th><th>출력</th></tr></thead><tbody>${lineRows}</tbody></table></div></details>
     </article>`;
   }).join("");
   const notice = error
@@ -1061,7 +1069,7 @@ export function payrollPage({
     content: `<section class="payroll-content">
       <header class="payroll-heading"><div><p class="form-kicker">PAYROLL</p><h1>급여 관리</h1><p>월급날 재직자의 급여대장을 확정하고 개인별 명세서를 출력합니다.</p></div><div class="payroll-headcount"><span>현재 재직자</span><strong>${activeEmployees.length.toLocaleString("ko-KR")}<small>명</small></strong></div></header>
       ${notice}
-      <aside class="payroll-caution"><span aria-hidden="true">!</span><p><strong>법정 세금·보험료 자동 계산 기능이 아닙니다.</strong> 직원 명부에 등록한 월 고정 공제 총액을 사용합니다. 실제 지급 전 세무·노무 담당자가 반드시 확인하세요.</p></aside>
+      <aside class="payroll-caution"><span aria-hidden="true">!</span><p><strong>소득세·지방소득세·4대 보험 근로자 부담분을 개략 추정해 자동 공제합니다.</strong> 비과세 식대(월 20만 원)를 제외한 과세 급여 기준이며 간이세액표·부양가족·연말정산·보험료 정산은 반영하지 않습니다. 실제 지급 전 세무·노무 담당자가 반드시 확인하세요.</p></aside>
 
       <section class="payroll-create-card">
         <div><p>NEW PAYROLL RUN</p><h2>월 급여 확정</h2><span>급여일 기준 입사 완료·재직 상태인 직원의 명세를 한 번에 생성합니다.</span></div>
@@ -1082,16 +1090,22 @@ export function payrollPage({
 
 export function payrollStatementsPage({ run, lines }) {
   const [year, month] = run.payPeriod.split("-").map(Number);
-  const slips = lines.map((line) => `<article class="payroll-slip" data-payroll-statement>
+  const slips = lines.map((line) => {
+    const legacyLine = line.statutoryDeduction === undefined;
+    const deductionRows = legacyLine
+      ? `<div><dt>등록 공제액</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div><div class="slip-spacer"><dt>공제 기준</dt><dd>직원 명부 등록액</dd></div><div class="subtotal"><dt>공제 합계</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div>`
+      : `<div><dt>소득세(추정)</dt><dd>${escapeHtml(formatMoney(line.incomeTax))}</dd></div><div><dt>지방소득세(추정)</dt><dd>${escapeHtml(formatMoney(line.localIncomeTax))}</dd></div><div><dt>국민연금</dt><dd>${escapeHtml(formatMoney(line.nationalPension))}</dd></div><div><dt>건강보험</dt><dd>${escapeHtml(formatMoney(line.healthInsurance))}</dd></div><div><dt>장기요양보험</dt><dd>${escapeHtml(formatMoney(line.longTermCareInsurance))}</dd></div><div><dt>고용보험</dt><dd>${escapeHtml(formatMoney(line.employmentInsurance))}</dd></div><div><dt>등록 공제액</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div><div class="subtotal"><dt>공제 합계</dt><dd>${escapeHtml(formatMoney(line.totalDeduction))}</dd></div>`;
+    return `<article class="payroll-slip" data-payroll-statement>
     <header><div><p>OhMyVibeERP</p><h1>${year}년 ${month}월 급여명세서</h1></div><span>${escapeHtml(run.number)}</span></header>
     <dl class="slip-employee"><div><dt>직원번호</dt><dd>${escapeHtml(line.employeeNumber)}</dd></div><div><dt>성명</dt><dd>${escapeHtml(line.name)}</dd></div><div><dt>부서·직급</dt><dd>${escapeHtml(line.department)} · ${escapeHtml(line.position)}</dd></div><div><dt>급여일</dt><dd>${escapeHtml(formatDate(run.payDate))}</dd></div></dl>
     <div class="slip-columns">
       <section><h2>지급 내역</h2><dl><div><dt>기본급</dt><dd>${escapeHtml(formatMoney(line.baseSalary))}</dd></div><div><dt>식대</dt><dd>${escapeHtml(formatMoney(line.mealAllowance))}</dd></div><div><dt>기타 수당</dt><dd>${escapeHtml(formatMoney(line.otherAllowance))}</dd></div><div class="subtotal"><dt>지급 합계</dt><dd>${escapeHtml(formatMoney(line.grossPay))}</dd></div></dl></section>
-      <section><h2>공제 내역</h2><dl><div><dt>등록 공제액</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div><div class="slip-spacer"><dt>공제 기준</dt><dd>직원 명부 등록액</dd></div><div class="subtotal"><dt>공제 합계</dt><dd>${escapeHtml(formatMoney(line.fixedDeduction))}</dd></div></dl></section>
+      <section><h2>공제 내역</h2><dl>${deductionRows}</dl></section>
     </div>
     <div class="slip-net"><span>실지급액</span><strong>${escapeHtml(formatMoney(line.netPay))}</strong></div>
-    <footer><p>본 명세서는 OhMyVibeERP 등록 급여 기준으로 생성되었습니다. 법정 공제 및 실제 지급 전 담당자 확인이 필요합니다.</p><span>확정일 ${escapeHtml(formatKoreanDateTime(run.confirmedAt))}</span></footer>
-  </article>`).join("");
+    <footer><p>본 명세서는 OhMyVibeERP 등록 급여 기준으로 생성되었습니다. 소득세·4대 보험 공제액은 간이세액표·부양가족을 반영하지 않은 개략 추정으로, 실제 지급 전 담당자 확인이 필요합니다.</p><span>확정일 ${escapeHtml(formatKoreanDateTime(run.confirmedAt))}</span></footer>
+  </article>`;
+  }).join("");
   return document({
     title: `${year}년 ${month}월 급여명세서 | OhMyVibeERP`,
     pageClass: "payroll-print-page",

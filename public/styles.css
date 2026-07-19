@@ -1257,13 +1257,13 @@ button, input { font: inherit; }
 .payroll-run-card header p { margin: 5px 0 0; color: #8a9590; font-size: 9px; }
 .payroll-run-actions { display: flex; align-items: center; gap: 10px; }
 .payroll-run-actions a { padding: 8px 11px; border-radius: 6px; color: #fff; background: #326f63; font-size: 9px; font-weight: 700; text-decoration: none; }
-.payroll-totals { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid #e4e6e0; background: #fafaf7; }
+.payroll-totals { display: grid; grid-template-columns: repeat(4,1fr); border-bottom: 1px solid #e4e6e0; background: #fafaf7; }
 .payroll-totals > div { padding: 17px 22px; border-left: 1px solid #e2e4de; }
 .payroll-totals > div:first-child { border-left: 0; }
 .payroll-totals span { display: block; color: #8c9692; font-size: 8px; }
 .payroll-totals strong { display: block; margin-top: 5px; color: #34443e; font-size: 16px; }
-.payroll-totals > div:nth-child(2) strong { color: #9c5b48; }
-.payroll-totals > div:nth-child(3) strong { color: #277063; }
+.payroll-totals > div:nth-child(2) strong, .payroll-totals > div:nth-child(3) strong { color: #9c5b48; }
+.payroll-totals > div:nth-child(4) strong { color: #277063; }
 .payroll-lines > summary { padding: 14px 22px; cursor: pointer; color: #586761; font-size: 9px; font-weight: 700; }
 .payroll-lines[open] > summary { border-bottom: 1px solid #e5e7e1; }
 .payroll-lines table { width: 100%; min-width: 980px; border-collapse: collapse; }

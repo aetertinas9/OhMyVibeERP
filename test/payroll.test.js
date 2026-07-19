@@ -61,7 +61,7 @@ test("급여 관리 화면은 100명 재직자와 이번 달 기본값을 보여
   assert.match(page.body, /<strong>100<small>명<\/small><\/strong>/);
   assert.match(page.body, /name="payPeriod" type="month" value="2026-07"/);
   assert.match(page.body, /name="payDate" type="date" value="2026-07-25"/);
-  assert.match(page.body, /법정 세금·보험료 자동 계산 기능이 아닙니다/);
+  assert.match(page.body, /소득세·지방소득세·4대 보험 근로자 부담분을 개략 추정해 자동 공제합니다/);
   assert.match(page.body, /확정된 급여대장이 없습니다/);
 });
 
@@ -82,8 +82,12 @@ test("월 급여 확정 후 100명 급여대장과 합계가 남는다", async (
   assert.match(page.body, /급여대장을 확정하고 직원별 급여명세를 생성했습니다/);
   assert.match(page.body, /PAY-202607-001/);
   assert.match(page.body, /504,200,000원/);
+  assert.match(page.body, /법정 공제 합계\(추정\)/);
+  assert.match(page.body, /87,436,690원/);
   assert.match(page.body, /42,300,000원/);
-  assert.match(page.body, /461,900,000원/);
+  assert.match(page.body, /374,463,310원/);
+  assert.match(page.body, /소득세·지방세/);
+  assert.match(page.body, /4대 보험/);
   assert.match(page.body, /100명 명세서 전체 출력/);
   assert.equal((page.body.match(/data-payroll-line/g) ?? []).length, 100);
 });
@@ -108,7 +112,12 @@ test("확정 급여에서 100명 전체 및 직원 한 명의 명세서를 출�
   assert.match(all.body, /김민준/);
   assert.match(all.body, /홍성민/);
   assert.match(all.body, /3,200,000원/);
-  assert.match(all.body, /2,900,000원/);
+  assert.match(all.body, /소득세\(추정\)/);
+  assert.match(all.body, /113,200원/);
+  assert.match(all.body, /국민연금/);
+  assert.match(all.body, /135,000원/);
+  assert.match(all.body, /706,640원/);
+  assert.match(all.body, /2,493,360원/);
 
   const one = await request(handler, {
     path: `/payroll/${run.id}/statements?employee=employee_seed_0001`,
@@ -118,6 +127,43 @@ test("확정 급여에서 100명 전체 및 직원 한 명의 명세서를 출�
   assert.match(one.body, /1명 명세서/);
   assert.match(one.body, /김민준/);
   assert.doesNotMatch(one.body, /홍성민/);
+});
+
+test("법정 공제 도입 전에 확정된 급여대장도 화면과 명세서가 열린다", async () => {
+  const legacyLine = {
+    id: "payroll_line_legacy", employeeId: "employee_seed_0001", employeeNumber: "EMP-0001",
+    name: "김민준", department: "경영지원", position: "사원", workLocation: "서울",
+    employmentType: "regular", baseSalary: 3_000_000, mealAllowance: 200_000, otherAllowance: 0,
+    grossPay: 3_200_000, fixedDeduction: 300_000, netPay: 2_900_000,
+  };
+  const legacyRun = {
+    id: "payroll_run_legacy", number: "PAY-202606-001", payPeriod: "2026-06", payDate: "2026-06-25",
+    status: "confirmed", employeeCount: 1, totalGrossPay: 3_200_000, totalDeduction: 300_000,
+    totalNetPay: 2_900_000, lines: [legacyLine], note: "", confirmedAt: "2026-06-25T00:00:00.000Z",
+    confirmedBy: "usr_admin",
+  };
+  const repository = new MasterDataRepository({
+    load: async () => ({
+      version: 1, partners: [], items: [], purchaseOrders: [], salesOrders: [],
+      billsOfMaterials: [], productionOrders: [], inventoryTransfers: [], inventoryCounts: [],
+      employees: [], payrollRuns: [legacyRun], periodClosures: [], settlements: [],
+    }),
+  });
+  const handler = await createRequestHandler({ masterDataRepository: repository, now: fixedNow });
+  const auth = await authenticated(handler);
+
+  const page = await request(handler, { path: "/payroll", headers: { cookie: auth.cookie } });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.body, /확정 당시 미계산/);
+  assert.match(page.body, /2,900,000원/);
+
+  const statements = await request(handler, {
+    path: `/payroll/${legacyRun.id}/statements`,
+    headers: { cookie: auth.cookie },
+  });
+  assert.equal(statements.statusCode, 200);
+  assert.match(statements.body, /직원 명부 등록액/);
+  assert.match(statements.body, /2,900,000원/);
 });
 
 test("급여 입력 오류·동일 귀속월 중복·CSRF 변조를 거부한다", async () => {
