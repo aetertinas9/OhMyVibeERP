@@ -173,6 +173,28 @@ function monthBounds(value) {
   };
 }
 
+function quarterBounds(value) {
+  const period = cleanText(value, 7).toUpperCase();
+  const match = period.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) {
+    throw new InputValidationError({ period: "조회 분기 형식이 올바르지 않습니다." });
+  }
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  const startMonth = (quarter - 1) * 3 + 1;
+  const endYear = quarter === 4 ? year + 1 : year;
+  const endMonth = quarter === 4 ? 1 : startMonth + 3;
+  return {
+    period,
+    year,
+    quarter,
+    startDate: `${String(year).padStart(4, "0")}-${String(startMonth).padStart(2, "0")}-01`,
+    endDate: new Date(Date.UTC(endYear, endMonth - 1, 0)).toISOString().slice(0, 10),
+    start: Date.parse(`${String(year).padStart(4, "0")}-${String(startMonth).padStart(2, "0")}-01T00:00:00+09:00`),
+    end: Date.parse(`${String(endYear).padStart(4, "0")}-${String(endMonth).padStart(2, "0")}-01T00:00:00+09:00`),
+  };
+}
+
 function koreanMonth(date) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
@@ -1277,6 +1299,169 @@ export class MasterDataRepository {
       purchaseReturnCount: purchaseReturns.length,
       salesReturnCount: salesReturns.length,
       transactions: [...purchases, ...sales, ...purchaseReturns, ...salesReturns].sort((left, right) => (
+        right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
+      )),
+    });
+  }
+
+  async quarterlyVatEstimate(periodInput) {
+    const bounds = quarterBounds(periodInput);
+    const data = await this.data();
+    const itemMap = new Map(data.items.map((item) => [item.id, item]));
+    const inQuarter = (timestamp) => {
+      const occurredAt = Date.parse(timestamp);
+      return Number.isFinite(occurredAt) && occurredAt >= bounds.start && occurredAt < bounds.end;
+    };
+    const movementLines = (order, movement, missingLineMessage) => movement.lines.map((movementLine) => {
+      const orderLine = order.lines.find(({ id }) => id === movementLine.lineId);
+      if (!orderLine) throw new BusinessRuleError(missingLineMessage);
+      const item = itemMap.get(orderLine.itemId);
+      const taxType = TAX_TYPES.has(item?.taxType) ? item.taxType : "unclassified";
+      const supplyAmount = roundMoney(Number(movementLine.quantity) * Number(orderLine.unitPrice));
+      const vatAmount = taxType === "taxable" ? roundMoney(supplyAmount * 0.1) : 0;
+      return {
+        itemId: orderLine.itemId,
+        quantity: Number(movementLine.quantity),
+        unitPrice: Number(orderLine.unitPrice),
+        taxType,
+        supplyAmount,
+        vatAmount,
+        grossAmount: roundMoney(supplyAmount + vatAmount),
+      };
+    });
+    const transaction = ({
+      id,
+      type,
+      direction,
+      isReturn,
+      occurredAt,
+      documentNumber,
+      sourceDocumentNumber = "",
+      partnerId,
+      warehouseId,
+      lines,
+    }) => ({
+      id,
+      type,
+      direction,
+      isReturn,
+      occurredAt,
+      documentNumber,
+      sourceDocumentNumber,
+      partnerId,
+      warehouseId,
+      lines,
+      supplyAmount: roundMoney(lines.reduce((total, line) => total + line.supplyAmount, 0)),
+      vatAmount: roundMoney(lines.reduce((total, line) => total + line.vatAmount, 0)),
+      grossAmount: roundMoney(lines.reduce((total, line) => total + line.grossAmount, 0)),
+    });
+
+    const purchaseReceipts = data.purchaseOrders.flatMap((order) => (order.receipts ?? [])
+      .filter((receipt) => inQuarter(receipt.receivedAt))
+      .map((receipt) => transaction({
+        id: receipt.id,
+        type: "purchase",
+        direction: "purchases",
+        isReturn: false,
+        occurredAt: receipt.receivedAt,
+        documentNumber: order.number,
+        partnerId: order.supplierId,
+        warehouseId: order.warehouseId,
+        lines: movementLines(order, receipt, "입고 이력의 발주 행을 찾을 수 없습니다."),
+      })));
+    const purchaseReturns = data.purchaseOrders.flatMap((order) => (order.returns ?? [])
+      .filter((returnRecord) => inQuarter(returnRecord.returnedAt))
+      .map((returnRecord) => transaction({
+        id: returnRecord.id,
+        type: "purchase_return",
+        direction: "purchases",
+        isReturn: true,
+        occurredAt: returnRecord.returnedAt,
+        documentNumber: returnRecord.number,
+        sourceDocumentNumber: order.number,
+        partnerId: order.supplierId,
+        warehouseId: order.warehouseId,
+        lines: movementLines(order, returnRecord, "구매 반품 이력의 발주 행을 찾을 수 없습니다."),
+      })));
+    const salesShipments = data.salesOrders.flatMap((order) => (order.shipments ?? [])
+      .filter((shipment) => inQuarter(shipment.shippedAt))
+      .map((shipment) => transaction({
+        id: shipment.id,
+        type: "sale",
+        direction: "sales",
+        isReturn: false,
+        occurredAt: shipment.shippedAt,
+        documentNumber: order.number,
+        partnerId: order.customerId,
+        warehouseId: order.warehouseId,
+        lines: movementLines(order, shipment, "출고 이력의 주문 행을 찾을 수 없습니다."),
+      })));
+    const salesReturns = data.salesOrders.flatMap((order) => (order.returns ?? [])
+      .filter((returnRecord) => inQuarter(returnRecord.returnedAt))
+      .map((returnRecord) => transaction({
+        id: returnRecord.id,
+        type: "sales_return",
+        direction: "sales",
+        isReturn: true,
+        occurredAt: returnRecord.returnedAt,
+        documentNumber: returnRecord.number,
+        sourceDocumentNumber: order.number,
+        partnerId: order.customerId,
+        warehouseId: order.warehouseId,
+        lines: movementLines(order, returnRecord, "판매 반품 이력의 주문 행을 찾을 수 없습니다."),
+      })));
+    const transactions = [
+      ...purchaseReceipts,
+      ...purchaseReturns,
+      ...salesShipments,
+      ...salesReturns,
+    ];
+    const sideTotals = () => ({
+      taxableSupplyAmount: 0,
+      zeroRatedSupplyAmount: 0,
+      exemptSupplyAmount: 0,
+      unclassifiedSupplyAmount: 0,
+      netSupplyAmount: 0,
+      vatAmount: 0,
+      grossAmount: 0,
+      transactionCount: 0,
+      returnCount: 0,
+    });
+    const totals = { sales: sideTotals(), purchases: sideTotals() };
+    const supplyField = {
+      taxable: "taxableSupplyAmount",
+      "zero-rated": "zeroRatedSupplyAmount",
+      exempt: "exemptSupplyAmount",
+      unclassified: "unclassifiedSupplyAmount",
+    };
+    for (const entry of transactions) {
+      const summary = totals[entry.direction];
+      const sign = entry.isReturn ? -1 : 1;
+      summary.transactionCount += entry.isReturn ? 0 : 1;
+      summary.returnCount += entry.isReturn ? 1 : 0;
+      for (const line of entry.lines) {
+        summary[supplyField[line.taxType]] = roundMoney(
+          summary[supplyField[line.taxType]] + sign * line.supplyAmount,
+        );
+        summary.netSupplyAmount = roundMoney(summary.netSupplyAmount + sign * line.supplyAmount);
+        summary.vatAmount = roundMoney(summary.vatAmount + sign * line.vatAmount);
+        summary.grossAmount = roundMoney(summary.grossAmount + sign * line.grossAmount);
+      }
+    }
+    const estimatedVatBalance = roundMoney(totals.sales.vatAmount - totals.purchases.vatAmount);
+    return copy({
+      ...bounds,
+      vatRate: 0.1,
+      sales: totals.sales,
+      purchases: totals.purchases,
+      estimatedVatBalance,
+      estimatedPayableVat: Math.max(estimatedVatBalance, 0),
+      estimatedRefundVat: Math.max(-estimatedVatBalance, 0),
+      hasUnclassifiedItems: (
+        totals.sales.unclassifiedSupplyAmount !== 0
+        || totals.purchases.unclassifiedSupplyAmount !== 0
+      ),
+      transactions: transactions.sort((left, right) => (
         right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
       )),
     });
