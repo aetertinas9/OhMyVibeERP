@@ -3,8 +3,13 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import {
+  AccountConflictError,
+  AccountNotFoundError,
+  AccountRuleError,
+  AccountValidationError,
   createDemoCredentialStore,
   createCredentialStore,
+  createManagedCredentialStore,
   DEMO_ACCOUNTS,
   LOGIN_CSRF_COOKIE,
   LoginRateLimiter,
@@ -17,6 +22,7 @@ import {
 } from "./auth.js";
 import { canAccess, departmentOf, permissionForRequest, PERMISSIONS } from "./access-control.js";
 import {
+  accountPage,
   appPage,
   employeePage,
   inventoryPage,
@@ -138,13 +144,24 @@ export async function createRequestHandler({
 } = {}) {
   const usesDemoAccount = !env.ERP_ADMIN_USERNAME && !env.ERP_ADMIN_PASSWORD;
   const secure = env.NODE_ENV === "production";
-  const credentials = credentialStore ?? (usesDemoAccount
-    ? await createDemoCredentialStore()
-    : await createCredentialStore({
-      username: env.ERP_ADMIN_USERNAME,
-      password: env.ERP_ADMIN_PASSWORD,
-      displayName: env.ERP_ADMIN_NAME ?? "관리자",
-    }));
+  let credentials = credentialStore;
+  if (!credentials) {
+    const baseCredentials = usesDemoAccount
+      ? await createDemoCredentialStore()
+      : await createCredentialStore({
+        username: env.ERP_ADMIN_USERNAME,
+        password: env.ERP_ADMIN_PASSWORD,
+        displayName: env.ERP_ADMIN_NAME ?? "관리자",
+      });
+    credentials = await createManagedCredentialStore({
+      baseStore: baseCredentials,
+      filePath: env.ERP_ACCOUNT_FILE,
+      now: () => new Date(now()),
+      reservedUsernames: usesDemoAccount
+        ? DEMO_ACCOUNTS.map(({ username }) => username)
+        : [env.ERP_ADMIN_USERNAME],
+    });
+  }
   const loginView = (options = {}) => ({
     showDemoAccount: usesDemoAccount,
     demoAccounts: usesDemoAccount ? DEMO_ACCOUNTS : [],
@@ -216,6 +233,18 @@ export async function createRequestHandler({
   const today = () => new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(now()));
+  const accountViewData = async () => {
+    if (typeof credentials.listAccounts !== "function") {
+      const error = new Error("이 인증 저장소에서는 개인 계정 관리를 사용할 수 없습니다.");
+      error.statusCode = 501;
+      throw error;
+    }
+    const [employees, accounts] = await Promise.all([
+      masterData.listEmployees(),
+      credentials.listAccounts(),
+    ]);
+    return { employees, accounts };
+  };
 
   const route = async (request, response) => {
     const url = new URL(request.url, "http://localhost");
@@ -597,6 +626,128 @@ export async function createRequestHandler({
           replenishmentValues,
           replenishmentFieldErrors: error.fieldErrors ?? {},
           replenishmentError: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    const accountActionMatch = url.pathname.match(/^\/accounts\/([^/]+)\/(lock|unlock|password)$/);
+    if (request.method === "GET" && url.pathname === "/accounts") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const view = await accountViewData();
+      const notice = url.searchParams.get("created") === "1"
+        ? "직원 개인 계정을 발급했습니다."
+        : url.searchParams.get("locked") === "1"
+          ? "계정을 잠그고 기존 로그인 세션을 종료했습니다."
+          : url.searchParams.get("unlocked") === "1"
+            ? "계정 잠금을 해제했습니다."
+            : url.searchParams.get("passwordReset") === "1"
+              ? "비밀번호를 재설정하고 기존 로그인 세션을 종료했습니다."
+              : "";
+      send(response, 200, accountPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        ...view,
+        values: { department: "" },
+        notice,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/accounts") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const values = Object.fromEntries([
+        "employeeId", "username", "department", "password",
+      ].map((field) => [field, form.get(field) ?? ""]));
+      try {
+        const employees = await masterData.listEmployees();
+        const employee = employees.find(({ id }) => id === values.employeeId);
+        if (!employee || employee.employmentStatus !== "active") {
+          throw new AccountValidationError("재직 중인 직원을 선택해 주세요.", {
+            employeeId: "재직 중인 직원을 선택해 주세요.",
+          });
+        }
+        await credentials.createAccount({
+          ...values,
+          employeeNumber: employee.employeeNumber,
+          displayName: employee.name,
+        }, session.user.id);
+        redirect(response, "/accounts?created=1", [], secure);
+      } catch (error) {
+        if (!(error instanceof AccountValidationError) && !(error instanceof AccountConflictError)) throw error;
+        const view = await accountViewData();
+        send(response, error.statusCode, accountPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          ...view,
+          values: { ...values, password: "" },
+          fieldErrors: error.fieldErrors ?? {},
+          error: error.message,
+        }), {
+          "Cache-Control": "no-store",
+          "Content-Type": "text/html; charset=utf-8",
+        }, secure);
+      }
+      return;
+    }
+
+    if (request.method === "POST" && accountActionMatch) {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const form = await readForm(request);
+      if (!safeTokenEqual(form.get("csrfToken"), session.csrfToken)) {
+        send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" }, secure);
+        return;
+      }
+      const [, accountId, action] = accountActionMatch;
+      try {
+        if (action === "password") {
+          const account = await credentials.resetPassword(accountId, form.get("newPassword"), session.user.id);
+          sessionStore.deleteByUserId(account.id);
+          if (account.id === session.user.id) {
+            redirect(response, "/login", [serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })], secure);
+          } else {
+            redirect(response, "/accounts?passwordReset=1", [], secure);
+          }
+          return;
+        }
+
+        const locked = action === "lock";
+        const account = await credentials.setLocked(accountId, locked, session.user.id);
+        if (locked) sessionStore.deleteByUserId(account.id);
+        redirect(response, `/accounts?${locked ? "locked" : "unlocked"}=1`, [], secure);
+      } catch (error) {
+        if (
+          !(error instanceof AccountValidationError)
+          && !(error instanceof AccountConflictError)
+          && !(error instanceof AccountNotFoundError)
+          && !(error instanceof AccountRuleError)
+        ) throw error;
+        const view = await accountViewData();
+        send(response, error.statusCode, accountPage({
+          user: session.user,
+          csrfToken: session.csrfToken,
+          ...view,
+          error: error.message,
         }), {
           "Cache-Control": "no-store",
           "Content-Type": "text/html; charset=utf-8",
@@ -1353,8 +1504,8 @@ export async function createRequestHandler({
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/inventory/transfers", "/inventory/counts", "/inventory/replenishments", "/purchase-orders", "/sales-orders",
       "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/vat", "/reports/monthly/close", "/employees", "/payroll",
-      "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments",
-    ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
+      "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments", "/accounts",
+    ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch) || Boolean(accountActionMatch);
     send(
       response,
       knownPath ? 405 : 404,

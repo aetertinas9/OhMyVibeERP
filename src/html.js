@@ -1,4 +1,4 @@
-import { canAccess, departmentLabel, PERMISSIONS } from "./access-control.js";
+import { canAccess, DEPARTMENTS, departmentLabel, PERMISSIONS } from "./access-control.js";
 
 const escapeHtml = (value = "") =>
   String(value).replace(
@@ -98,7 +98,7 @@ export function loginPage({
 
             ${showDemoAccount ? `<aside class="demo-account department-demo" aria-label="체험 계정 안내">
               <span>DEMO</span>
-              <div><p><strong>부서별 체험 계정</strong><small>비밀번호 공통 · <code>ChangeMe123!</code></small></p><ul>${demoAccounts.map((account) => `<li data-demo-account="${escapeHtml(account.username)}"><b>${escapeHtml(account.department === "management" ? "관리" : departmentLabel(account))}</b><code>${escapeHtml(account.username)}</code></li>`).join("")}</ul></div>
+              <div><p><strong>개발용 초기 체험 계정</strong><small>비밀번호 공통 · <code>ChangeMe123!</code></small></p><ul>${demoAccounts.map((account) => `<li data-demo-account="${escapeHtml(account.username)}"><b>${escapeHtml(account.department === "management" ? "관리" : departmentLabel(account))}</b><code>${escapeHtml(account.username)}</code></li>`).join("")}</ul></div>
             </aside>` : ""}
             <p class="help-text">로그인에 문제가 있나요? <a href="mailto:help@ohmyvibeerp.example">관리자에게 문의</a></p>
           </div>
@@ -130,6 +130,9 @@ const navigationGroups = Object.freeze([
   Object.freeze({ label: "인사 · 급여", links: Object.freeze([
     Object.freeze({ active: "employees", href: "/employees", icon: "♙", label: "직원 명부", description: "직원·급여 기준정보", permission: PERMISSIONS.EMPLOYEES_MANAGE }),
     Object.freeze({ active: "payroll", href: "/payroll", icon: "₩", label: "급여 관리", description: "월 급여와 명세서", permission: PERMISSIONS.PAYROLL_MANAGE }),
+  ]) }),
+  Object.freeze({ label: "시스템", links: Object.freeze([
+    Object.freeze({ active: "accounts", href: "/accounts", icon: "●", label: "계정 관리", description: "직원별 로그인 계정", permission: PERMISSIONS.ACCOUNTS_MANAGE }),
   ]) }),
 ]);
 
@@ -942,6 +945,79 @@ const employmentTypeLabels = {
   contract: "계약직",
   "part-time": "시간제",
 };
+
+export function accountPage({
+  user,
+  csrfToken,
+  employees,
+  accounts,
+  values = {},
+  fieldErrors = {},
+  error = "",
+  notice = "",
+}) {
+  const assignedEmployeeIds = new Set(accounts.map(({ employeeId }) => employeeId));
+  const availableEmployees = employees.filter((employee) => (
+    employee.employmentStatus === "active" && !assignedEmployeeIds.has(employee.id)
+  ));
+  const employeeOptions = availableEmployees.map((employee) => (
+    `<option value="${escapeHtml(employee.id)}"${values.employeeId === employee.id ? " selected" : ""}>${escapeHtml(employee.employeeNumber)} · ${escapeHtml(employee.name)} · ${escapeHtml(employee.department)}</option>`
+  )).join("");
+  const departmentOptions = Object.entries(DEPARTMENTS).map(([value, department]) => (
+    `<option value="${escapeHtml(value)}"${values.department === value ? " selected" : ""}>${escapeHtml(department.label)} · ${escapeHtml(department.roleLabel)}</option>`
+  )).join("");
+  const accountRows = accounts.map((account) => `<tr data-account="${escapeHtml(account.username)}">
+    <td><strong>${escapeHtml(account.displayName)}</strong><small>${escapeHtml(account.employeeNumber)}</small></td>
+    <td><strong class="record-code">${escapeHtml(account.username)}</strong><small>개인 계정</small></td>
+    <td><strong>${escapeHtml(DEPARTMENTS[account.department]?.label ?? account.department)}</strong><small>${escapeHtml(account.role)}</small></td>
+    <td><span class="account-status ${account.locked ? "locked" : "active"}">${account.locked ? "잠김" : "사용 가능"}</span><small>${escapeHtml(account.locked ? `${formatKoreanDateTime(account.lockedAt)} · ${account.lockedBy}` : `변경 ${formatKoreanDateTime(account.updatedAt)}`)}</small></td>
+    <td class="account-actions">
+      <form action="/accounts/${escapeHtml(account.id)}/${account.locked ? "unlock" : "lock"}" method="post">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+        <button type="submit" class="${account.locked ? "unlock" : "lock"}"${!account.locked && account.id === user.id ? " disabled" : ""}>${account.locked ? "잠금 해제" : "계정 잠금"}</button>
+      </form>
+      <details><summary>비밀번호 재설정</summary><form action="/accounts/${escapeHtml(account.id)}/password" method="post">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+        <label><span class="sr-only">${escapeHtml(account.displayName)} 새 비밀번호</span><input name="newPassword" type="password" minlength="12" maxlength="200" autocomplete="new-password" placeholder="새 비밀번호 12자 이상" required></label>
+        <button type="submit">변경</button>
+      </form></details>
+    </td>
+  </tr>`).join("");
+  const statusNotice = error
+    ? `<div class="form-notice error" role="alert">${escapeHtml(error)}</div>`
+    : notice
+      ? `<div class="form-notice success" role="status">${escapeHtml(notice)}</div>`
+      : "";
+
+  return workspacePage({
+    title: "계정 관리",
+    active: "accounts",
+    user,
+    csrfToken,
+    content: `<section class="account-content">
+      <header class="account-heading"><div><p class="form-kicker">ACCESS CONTROL</p><h1>직원별 계정 관리</h1><p>직원 한 명당 로그인 계정 하나를 발급하고 접근 상태를 통제합니다.</p></div><div class="account-count"><span>개인 계정</span><strong>${accounts.length.toLocaleString("ko-KR")}<small>개</small></strong></div></header>
+      ${statusNotice}
+      <aside class="account-caution"><span aria-hidden="true">!</span><p><strong>부서 공용 아이디를 공유하지 마세요.</strong> 계정 잠금과 비밀번호 재설정은 해당 직원의 기존 로그인 세션도 즉시 종료합니다. 비밀번호 원문은 저장하거나 화면에 다시 표시하지 않습니다.</p></aside>
+
+      <section class="account-create-card" aria-labelledby="account-create-title">
+        <div><p>NEW ACCOUNT</p><h2 id="account-create-title">개인 계정 발급</h2><span>재직 중이며 아직 계정이 없는 직원만 선택할 수 있습니다.</span></div>
+        <form action="/accounts" method="post" class="account-create-form">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}">
+          <label>직원 <b>*</b><select name="employeeId" required${inputState("employeeId", fieldErrors)}><option value="">직원 선택</option>${employeeOptions}</select>${fieldError("employeeId", fieldErrors)}</label>
+          <label>로그인 아이디 <b>*</b><input name="username" value="${escapeHtml(values.username)}" minlength="3" maxlength="50" pattern="[a-z0-9][a-z0-9._-]{2,49}" autocomplete="off" placeholder="예: gildong.hong" required${inputState("username", fieldErrors)}>${fieldError("username", fieldErrors)}</label>
+          <label>업무 부서 <b>*</b><select name="department" required${inputState("department", fieldErrors)}><option value="">부서 선택</option>${departmentOptions}</select>${fieldError("department", fieldErrors)}</label>
+          <label>초기 비밀번호 <b>*</b><input name="password" type="password" minlength="12" maxlength="200" autocomplete="new-password" placeholder="12자 이상" required${inputState("password", fieldErrors)}>${fieldError("password", fieldErrors)}</label>
+          <button type="submit"${!availableEmployees.length ? " disabled" : ""}>계정 발급 <span aria-hidden="true">→</span></button>
+        </form>
+      </section>
+
+      <section class="account-directory">
+        <div class="account-directory-heading"><div><p>INDIVIDUAL ACCOUNTS</p><h2>발급 계정</h2></div><span>사용 가능 <strong>${accounts.filter(({ locked }) => !locked).length.toLocaleString("ko-KR")}</strong> · 잠김 <strong>${accounts.filter(({ locked }) => locked).length.toLocaleString("ko-KR")}</strong></span></div>
+        ${accounts.length ? `<div class="table-scroll"><table><thead><tr><th>직원</th><th>로그인 아이디</th><th>업무 부서·권한</th><th>상태·최근 변경</th><th>관리</th></tr></thead><tbody>${accountRows}</tbody></table></div>` : `<div class="report-empty"><span aria-hidden="true">●</span><strong>발급된 개인 계정이 없습니다.</strong><p>위 양식에서 직원의 첫 개인 계정을 만들어 주세요.</p></div>`}
+      </section>
+    </section>`,
+  });
+}
 
 export function employeePage({
   user,

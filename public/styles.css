@@ -1345,3 +1345,70 @@ button, input { font: inherit; }
   .department-home { padding: 42px 18px 65px; }
   .department-task-grid { grid-template-columns: 1fr; }
 }
+
+/* Individual employee accounts */
+.account-content { width: min(100%, 1500px); margin: 0 auto; padding: 54px 48px 72px; }
+.account-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.account-heading h1 { margin: 5px 0 7px; color: #263b34; font-size: 27px; letter-spacing: -.04em; }
+.account-heading p { margin: 0; color: #89938f; font-size: 10px; }
+.account-heading .form-kicker { color: #3d776b; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.account-count { min-width: 118px; padding: 15px 18px; border-left: 2px solid #efaa43; background: rgba(255,255,255,.52); }
+.account-count span { display: block; color: #8b9691; font-size: 8px; }
+.account-count strong { display: block; margin-top: 3px; color: #25473f; font-size: 22px; }
+.account-count small { margin-left: 3px; font-size: 9px; }
+.account-caution { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; padding: 15px 18px; border: 1px solid #e5d6bd; border-radius: 8px; background: #fffaf0; }
+.account-caution > span { display: grid; flex: 0 0 25px; height: 25px; place-items: center; border-radius: 50%; color: #fff; background: #d18b2e; font-size: 11px; font-weight: 800; }
+.account-caution p { margin: 0; color: #7a6b55; font-size: 9px; line-height: 1.6; }
+.account-caution strong { color: #584c3b; }
+.account-create-card { display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 26px; margin-bottom: 26px; padding: 23px; border: 1px solid #d8ddd7; border-radius: 11px; background: rgba(255,255,255,.7); box-shadow: 0 8px 25px rgba(36,54,48,.04); }
+.account-create-card > div p, .account-directory-heading p { margin: 0 0 5px; color: #3e786c; font-size: 8px; font-weight: 800; letter-spacing: .14em; }
+.account-create-card h2, .account-directory-heading h2 { margin: 0; color: #31443d; font-size: 16px; }
+.account-create-card > div span { display: block; margin-top: 8px; color: #8c9692; font-size: 8px; line-height: 1.5; }
+.account-create-form { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr auto; align-items: start; gap: 11px; }
+.account-create-form label { color: #66736e; font-size: 8px; font-weight: 700; }
+.account-create-form label b { color: #bd6650; }
+.account-create-form input, .account-create-form select { width: 100%; height: 40px; margin-top: 6px; padding: 0 10px; border: 1px solid #d3d9d4; border-radius: 6px; color: #35463f; background: #fff; font-size: 9px; }
+.account-create-form [aria-invalid="true"] { border-color: #bf6a53; background: #fffafa; }
+.account-create-form .field-error { display: block; margin-top: 4px; color: #b35c48; font-size: 8px; line-height: 1.4; }
+.account-create-form > button { align-self: end; height: 40px; padding: 0 15px; border: 0; border-radius: 6px; color: #fff; background: #1b4b41; cursor: pointer; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.account-create-form > button span { color: #f3a53a; }
+.account-create-form > button:disabled { cursor: not-allowed; opacity: .45; }
+.account-directory { overflow: hidden; border: 1px solid #d8ddd7; border-radius: 11px; background: rgba(255,255,255,.7); box-shadow: 0 8px 25px rgba(36,54,48,.04); }
+.account-directory-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 22px; border-bottom: 1px solid #dfe3de; }
+.account-directory-heading > span { color: #87918d; font-size: 9px; }
+.account-directory-heading > span strong { color: #2e6257; }
+.account-directory table { width: 100%; min-width: 970px; border-collapse: collapse; }
+.account-directory th { height: 39px; padding: 0 14px; color: #89938f; background: #f5f5f0; font-size: 8px; text-align: left; white-space: nowrap; }
+.account-directory td { height: 66px; padding: 10px 14px; border-top: 1px solid #e7e9e4; color: #5c6964; font-size: 9px; vertical-align: middle; }
+.account-directory td > strong, .account-directory td > small { display: block; }
+.account-directory td > strong { color: #34443e; }
+.account-directory td > small { margin-top: 4px; color: #939c98; font-size: 8px; }
+.account-status { display: inline-flex; align-items: center; padding: 5px 8px; border-radius: 999px; font-size: 8px; font-weight: 800; }
+.account-status.active { color: #286356; background: #e2f1ec; }
+.account-status.locked { color: #9a4e3d; background: #f8e5e0; }
+.account-actions { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.account-actions form { margin: 0; }
+.account-actions button, .account-actions summary { border: 1px solid #ccd8d3; border-radius: 5px; color: #326f63; background: #fff; cursor: pointer; font-size: 8px; font-weight: 700; }
+.account-actions > form button { height: 29px; padding: 0 9px; }
+.account-actions button.lock { color: #98503f; border-color: #e3c5bd; }
+.account-actions button:disabled { cursor: not-allowed; opacity: .4; }
+.account-actions details { position: relative; }
+.account-actions summary { padding: 7px 9px; list-style: none; }
+.account-actions summary::-webkit-details-marker { display: none; }
+.account-actions details form { position: absolute; z-index: 3; right: 0; display: flex; gap: 6px; width: 280px; margin-top: 6px; padding: 9px; border: 1px solid #d3d9d4; border-radius: 7px; background: #fff; box-shadow: 0 9px 24px rgba(30,50,42,.14); }
+.account-actions details input { min-width: 0; height: 31px; padding: 0 8px; border: 1px solid #d2d8d3; border-radius: 5px; font-size: 8px; }
+.account-actions details button { flex: 0 0 auto; padding: 0 10px; background: #edf5f2; }
+
+@media (max-width: 1150px) {
+  .account-create-card { grid-template-columns: 1fr; }
+  .account-create-form { grid-template-columns: repeat(2,1fr); }
+  .account-create-form > button { align-self: auto; }
+}
+
+@media (max-width: 760px) {
+  .account-content { padding: 40px 18px 65px; }
+  .account-heading { align-items: flex-start; flex-direction: column; }
+  .account-count { width: 100%; }
+  .account-caution { align-items: flex-start; }
+  .account-create-form { grid-template-columns: 1fr; }
+}
