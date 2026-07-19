@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  BusinessRuleError,
   DuplicateRecordError,
   InputValidationError,
   MasterDataRepository,
@@ -42,8 +43,10 @@ test("급여일에 재직자 100명의 급여명세와 합계를 한 번에 확�
   assert.equal(run.employeeCount, 100);
   assert.equal(run.lines.length, 100);
   assert.equal(run.totalGrossPay, 504_200_000);
-  assert.equal(run.totalDeduction, 42_300_000);
-  assert.equal(run.totalNetPay, 461_900_000);
+  assert.equal(run.totalStatutoryDeduction, 87_436_690);
+  assert.equal(run.totalFixedDeduction, 42_300_000);
+  assert.equal(run.totalDeduction, 129_736_690);
+  assert.equal(run.totalNetPay, 374_463_310);
   assert.deepEqual(run.lines[0], {
     id: run.lines[0].id,
     employeeId: "employee_seed_0001",
@@ -57,8 +60,18 @@ test("급여일에 재직자 100명의 급여명세와 합계를 한 번에 확�
     mealAllowance: 200_000,
     otherAllowance: 0,
     grossPay: 3_200_000,
+    taxablePay: 3_000_000,
+    nonTaxableMeal: 200_000,
+    incomeTax: 113_200,
+    localIncomeTax: 11_320,
+    nationalPension: 135_000,
+    healthInsurance: 106_350,
+    longTermCareInsurance: 13_770,
+    employmentInsurance: 27_000,
+    statutoryDeduction: 406_640,
     fixedDeduction: 300_000,
-    netPay: 2_900_000,
+    totalDeduction: 706_640,
+    netPay: 2_493_360,
   });
   assert.deepEqual(await repository.getPayrollRun(run.id), run);
 });
@@ -86,6 +99,29 @@ test("같은 귀속월의 중복·동시 급여 확정은 한 건만 허용한�
   assert.deepEqual(results.map(({ status }) => status).sort(), ["fulfilled", "rejected"]);
   assert.ok(results.find(({ status }) => status === "rejected").reason instanceof DuplicateRecordError);
   assert.equal((await repository.listPayrollRuns()).length, 1);
+});
+
+test("법정 공제와 등록 공제 합계가 지급 합계를 초과하면 확정을 거부한다", async () => {
+  const repository = new MasterDataRepository();
+  await repository.createEmployee({
+    ...extraEmployee,
+    employeeNumber: "EMP-0102",
+    email: "employee102@ohmyvibeerp.example",
+    hireDate: "2026-01-05",
+    baseSalary: "1000000",
+    mealAllowance: "0",
+    otherAllowance: "0",
+    fixedDeduction: "1000000",
+  }, "usr_admin");
+
+  await assert.rejects(repository.createPayrollRun({
+    payPeriod: "2026-07", payDate: "2026-07-25",
+  }, "usr_admin"), (error) => {
+    assert.ok(error instanceof BusinessRuleError);
+    assert.match(error.message, /EMP-0102 직원의 공제 합계가 지급 합계를 초과합니다/);
+    return true;
+  });
+  assert.deepEqual(await repository.listPayrollRuns(), []);
 });
 
 test("급여 귀속월과 급여일 입력 오류를 거부한다", async () => {

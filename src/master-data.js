@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createSyntheticEmployees } from "./employee-seed.js";
+import { estimateStatutoryDeductions } from "./payroll-deductions.js";
 
 const DEFAULT_DATA_FILE = fileURLToPath(new URL("../data/master-data.json", import.meta.url));
 const PARTNER_TYPES = new Set(["sales", "purchases"]);
@@ -1669,8 +1670,10 @@ export class MasterDataRepository {
         if (![baseSalary, mealAllowance, otherAllowance, fixedDeduction, grossPay].every(Number.isFinite)) {
           throw new BusinessRuleError(`${employee.employeeNumber} 직원의 급여 기준정보가 올바르지 않습니다.`);
         }
-        if (fixedDeduction > grossPay) {
-          throw new BusinessRuleError(`${employee.employeeNumber} 직원의 등록 공제액이 지급 합계를 초과합니다.`);
+        const statutory = estimateStatutoryDeductions({ grossPay, mealAllowance });
+        const totalDeduction = roundMoney(statutory.statutoryDeduction + fixedDeduction);
+        if (totalDeduction > grossPay) {
+          throw new BusinessRuleError(`${employee.employeeNumber} 직원의 공제 합계가 지급 합계를 초과합니다.`);
         }
         return {
           id: `payroll_line_${this.createId()}`,
@@ -1685,8 +1688,18 @@ export class MasterDataRepository {
           mealAllowance,
           otherAllowance,
           grossPay,
+          taxablePay: statutory.taxablePay,
+          nonTaxableMeal: statutory.nonTaxableMeal,
+          incomeTax: statutory.incomeTax,
+          localIncomeTax: statutory.localIncomeTax,
+          nationalPension: statutory.nationalPension,
+          healthInsurance: statutory.healthInsurance,
+          longTermCareInsurance: statutory.longTermCareInsurance,
+          employmentInsurance: statutory.employmentInsurance,
+          statutoryDeduction: statutory.statutoryDeduction,
           fixedDeduction,
-          netPay: roundMoney(grossPay - fixedDeduction),
+          totalDeduction,
+          netPay: roundMoney(grossPay - totalDeduction),
         };
       });
 
@@ -1702,7 +1715,9 @@ export class MasterDataRepository {
         status: "confirmed",
         employeeCount: lines.length,
         totalGrossPay: roundMoney(lines.reduce((total, line) => total + line.grossPay, 0)),
-        totalDeduction: roundMoney(lines.reduce((total, line) => total + line.fixedDeduction, 0)),
+        totalStatutoryDeduction: roundMoney(lines.reduce((total, line) => total + line.statutoryDeduction, 0)),
+        totalFixedDeduction: roundMoney(lines.reduce((total, line) => total + line.fixedDeduction, 0)),
+        totalDeduction: roundMoney(lines.reduce((total, line) => total + line.totalDeduction, 0)),
         totalNetPay: roundMoney(lines.reduce((total, line) => total + line.netPay, 0)),
         lines,
         note: validated.note,
