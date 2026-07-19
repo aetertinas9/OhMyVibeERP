@@ -43,10 +43,10 @@ test("급여일에 재직자 100명의 급여명세와 합계를 한 번에 확�
   assert.equal(run.employeeCount, 100);
   assert.equal(run.lines.length, 100);
   assert.equal(run.totalGrossPay, 504_200_000);
-  assert.equal(run.totalStatutoryDeduction, 87_436_690);
+  assert.equal(run.totalStatutoryDeduction, 88_804_020);
   assert.equal(run.totalFixedDeduction, 42_300_000);
-  assert.equal(run.totalDeduction, 129_736_690);
-  assert.equal(run.totalNetPay, 374_463_310);
+  assert.equal(run.totalDeduction, 131_104_020);
+  assert.equal(run.totalNetPay, 373_095_980);
   assert.deepEqual(run.lines[0], {
     id: run.lines[0].id,
     employeeId: "employee_seed_0001",
@@ -62,16 +62,16 @@ test("급여일에 재직자 100명의 급여명세와 합계를 한 번에 확�
     grossPay: 3_200_000,
     taxablePay: 3_000_000,
     nonTaxableMeal: 200_000,
-    incomeTax: 113_200,
-    localIncomeTax: 11_320,
-    nationalPension: 135_000,
-    healthInsurance: 106_350,
-    longTermCareInsurance: 13_770,
+    incomeTax: 112_080,
+    localIncomeTax: 11_200,
+    nationalPension: 142_500,
+    healthInsurance: 107_850,
+    longTermCareInsurance: 14_170,
     employmentInsurance: 27_000,
-    statutoryDeduction: 406_640,
+    statutoryDeduction: 414_800,
     fixedDeduction: 300_000,
-    totalDeduction: 706_640,
-    netPay: 2_493_360,
+    totalDeduction: 714_800,
+    netPay: 2_485_200,
   });
   assert.deepEqual(await repository.getPayrollRun(run.id), run);
 });

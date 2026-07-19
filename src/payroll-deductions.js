@@ -2,13 +2,33 @@
 // 근사 계산이므로 실제 원천징수액과 다를 수 있다.
 export const STATUTORY_RATES = Object.freeze({
   nonTaxableMealLimit: 200_000,
-  nationalPension: Object.freeze({ rate: 0.045, minBase: 400_000, maxBase: 6_370_000 }),
-  healthInsurance: Object.freeze({ rate: 0.03545 }),
-  longTermCare: Object.freeze({ rateOfHealth: 0.1295 }),
+  nationalPension: Object.freeze({ rate: 0.0475, minBase: 410_000, maxBase: 6_590_000 }),
+  healthInsurance: Object.freeze({ rate: 0.03595 }),
+  longTermCare: Object.freeze({ rateOfHealth: 0.009448 / 0.0719 }),
   employmentInsurance: Object.freeze({ rate: 0.009 }),
   localIncomeTax: Object.freeze({ rateOfIncomeTax: 0.1 }),
   basicPersonalDeduction: 1_500_000,
 });
+
+const LEGACY_2025_RATES = Object.freeze({
+  nationalPension: Object.freeze({ rate: 0.045, minBase: 400_000, maxBase: 6_370_000 }),
+  healthInsurance: Object.freeze({ rate: 0.03545 }),
+  longTermCare: Object.freeze({ rateOfHealth: 0.1295 }),
+});
+
+function ratesForPayPeriod(payPeriod) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(payPeriod)) {
+    throw new TypeError("법정 공제 추정에는 YYYY-MM 형식의 급여 귀속월이 필요합니다.");
+  }
+  if (payPeriod < "2026-01") return LEGACY_2025_RATES;
+  if (payPeriod < "2026-07") {
+    return {
+      ...STATUTORY_RATES,
+      nationalPension: { ...STATUTORY_RATES.nationalPension, minBase: 400_000, maxBase: 6_370_000 },
+    };
+  }
+  return STATUTORY_RATES;
+}
 
 const EARNED_INCOME_DEDUCTION_BRACKETS = Object.freeze([
   Object.freeze({ limit: 5_000_000, base: 0, rate: 0.7, over: 0 }),
@@ -54,18 +74,19 @@ function earnedIncomeTaxCredit(computedTax, annualGross) {
   return Math.min(credit, cap);
 }
 
-export function estimateStatutoryDeductions({ grossPay, mealAllowance = 0 }) {
+export function estimateStatutoryDeductions({ grossPay, mealAllowance = 0, payPeriod = "2026-07" }) {
   if (!Number.isFinite(grossPay) || grossPay < 0 || !Number.isFinite(mealAllowance) || mealAllowance < 0) {
     throw new TypeError("법정 공제 추정에는 0 이상의 지급액이 필요합니다.");
   }
+  const rates = ratesForPayPeriod(payPeriod);
   const nonTaxableMeal = Math.min(mealAllowance, STATUTORY_RATES.nonTaxableMealLimit);
   const taxablePay = Math.max(0, grossPay - nonTaxableMeal);
 
-  const pension = STATUTORY_RATES.nationalPension;
+  const pension = rates.nationalPension;
   const pensionBase = Math.min(Math.max(taxablePay, pension.minBase), pension.maxBase);
   const nationalPension = floorTen(pensionBase * pension.rate);
-  const healthInsurance = floorTen(taxablePay * STATUTORY_RATES.healthInsurance.rate);
-  const longTermCareInsurance = floorTen(healthInsurance * STATUTORY_RATES.longTermCare.rateOfHealth);
+  const healthInsurance = floorTen(taxablePay * rates.healthInsurance.rate);
+  const longTermCareInsurance = floorTen(healthInsurance * rates.longTermCare.rateOfHealth);
   const employmentInsurance = floorTen(taxablePay * STATUTORY_RATES.employmentInsurance.rate);
 
   const annualGross = taxablePay * 12;

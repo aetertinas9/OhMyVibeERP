@@ -1069,7 +1069,7 @@ export function payrollPage({
     content: `<section class="payroll-content">
       <header class="payroll-heading"><div><p class="form-kicker">PAYROLL</p><h1>급여 관리</h1><p>월급날 재직자의 급여대장을 확정하고 개인별 명세서를 출력합니다.</p></div><div class="payroll-headcount"><span>현재 재직자</span><strong>${activeEmployees.length.toLocaleString("ko-KR")}<small>명</small></strong></div></header>
       ${notice}
-      <aside class="payroll-caution"><span aria-hidden="true">!</span><p><strong>소득세·지방소득세·4대 보험 근로자 부담분을 개략 추정해 자동 공제합니다.</strong> 비과세 식대(월 20만 원)를 제외한 과세 급여 기준이며 간이세액표·부양가족·연말정산·보험료 정산은 반영하지 않습니다. 실제 지급 전 세무·노무 담당자가 반드시 확인하세요.</p></aside>
+      <aside class="payroll-caution"><span aria-hidden="true">!</span><p><strong>2026년 소득세·지방소득세·4대 보험 근로자 부담분을 개략 추정해 자동 공제합니다.</strong> 국민연금 4.75%, 건강보험 3.595%, 장기요양은 건강보험료의 약 13.14%, 고용보험 0.9%를 사용합니다. 비과세 식대(월 20만 원)를 제외한 과세 급여 기준이며 간이세액표·부양가족·연말정산·보험료 고지·정산은 반영하지 않습니다. 실제 지급 전 세무·노무 담당자가 반드시 확인하세요.</p></aside>
 
       <section class="payroll-create-card">
         <div><p>NEW PAYROLL RUN</p><h2>월 급여 확정</h2><span>급여일 기준 입사 완료·재직 상태인 직원의 명세를 한 번에 생성합니다.</span></div>

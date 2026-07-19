@@ -1670,7 +1670,11 @@ export class MasterDataRepository {
         if (![baseSalary, mealAllowance, otherAllowance, fixedDeduction, grossPay].every(Number.isFinite)) {
           throw new BusinessRuleError(`${employee.employeeNumber} 직원의 급여 기준정보가 올바르지 않습니다.`);
         }
-        const statutory = estimateStatutoryDeductions({ grossPay, mealAllowance });
+        const statutory = estimateStatutoryDeductions({
+          grossPay,
+          mealAllowance,
+          payPeriod: validated.payPeriod,
+        });
         const totalDeduction = roundMoney(statutory.statutoryDeduction + fixedDeduction);
         if (totalDeduction > grossPay) {
           throw new BusinessRuleError(`${employee.employeeNumber} 직원의 공제 합계가 지급 합계를 초과합니다.`);
