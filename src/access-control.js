@@ -117,6 +117,7 @@ export function permissionForRequest(method, pathname) {
     return PERMISSIONS.PRODUCTION_MANAGE;
   }
   if (pathname === "/reports/monthly") return PERMISSIONS.FINANCE_REPORT;
+  if (pathname === "/reports/vat") return PERMISSIONS.FINANCE_REPORT;
   if (pathname === "/reports/monthly/close") return PERMISSIONS.FINANCE_CLOSE;
   if (pathname === "/settlements" || pathname === "/settlements/collections" || pathname === "/settlements/payments") {
     return PERMISSIONS.FINANCE_SETTLEMENTS;

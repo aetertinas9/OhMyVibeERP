@@ -30,6 +30,7 @@ import {
   purchaseOrdersPage,
   salesOrdersPage,
   settlementsPage,
+  vatReportPage,
 } from "./html.js";
 import {
   BusinessRuleError,
@@ -203,6 +204,15 @@ export async function createRequestHandler({
     };
   };
   const settlementViewData = async () => ({ overview: await masterData.settlementOverview() });
+  const vatReportViewData = async (period) => {
+    const [summary, purchasePartners, salesPartners, items] = await Promise.all([
+      masterData.quarterlyVatEstimate(period),
+      masterData.listPartners("purchases"),
+      masterData.listPartners("sales"),
+      masterData.listItems(),
+    ]);
+    return { summary, partners: [...purchasePartners, ...salesPartners], items };
+  };
   const today = () => new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(now()));
@@ -1111,6 +1121,28 @@ export async function createRequestHandler({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/reports/vat") {
+      if (!session) {
+        redirect(response, "/login", [], secure);
+        return;
+      }
+      const currentYear = Number(today().slice(0, 4));
+      const currentMonth = Number(today().slice(5, 7));
+      const year = url.searchParams.get("year") ?? String(currentYear);
+      const quarter = url.searchParams.get("quarter") ?? String(Math.floor((currentMonth - 1) / 3) + 1);
+      const view = await vatReportViewData(`${year}-Q${quarter}`);
+      send(response, 200, vatReportPage({
+        user: session.user,
+        csrfToken: session.csrfToken,
+        warehouses: WAREHOUSES,
+        ...view,
+      }), {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+      }, secure);
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/settlements") {
       if (!session) {
         redirect(response, "/login", [], secure);
@@ -1320,7 +1352,7 @@ export async function createRequestHandler({
 
     const knownPath = [
       "/login", "/app", "/logout", "/healthz", "/items", "/inventory", "/inventory/transfers", "/inventory/counts", "/inventory/replenishments", "/purchase-orders", "/sales-orders",
-      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/monthly/close", "/employees", "/payroll",
+      "/production", "/production/boms", "/production/orders", "/reports/monthly", "/reports/vat", "/reports/monthly/close", "/employees", "/payroll",
       "/payroll/runs", "/settlements", "/settlements/collections", "/settlements/payments",
     ].includes(url.pathname) || Boolean(partnerMatch) || Boolean(receiptMatch) || Boolean(shipmentMatch) || Boolean(payrollStatementMatch);
     send(

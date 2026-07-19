@@ -124,6 +124,7 @@ const navigationGroups = Object.freeze([
   ]) }),
   Object.freeze({ label: "보고서", links: Object.freeze([
     Object.freeze({ active: "monthly-report", href: "/reports/monthly", icon: "₩", label: "월간 매입·판매", description: "월간 금액과 회계월 마감", permission: PERMISSIONS.FINANCE_REPORT }),
+    Object.freeze({ active: "vat-report", href: "/reports/vat", icon: "VAT", label: "분기 부가세", description: "매출·매입세액과 예상 납부액", permission: PERMISSIONS.FINANCE_REPORT }),
     Object.freeze({ active: "settlements", href: "/settlements", icon: "◎", label: "받을 돈 · 줄 돈", description: "거래처별 입금·지급과 잔액", permission: PERMISSIONS.FINANCE_SETTLEMENTS }),
   ]) }),
   Object.freeze({ label: "인사 · 급여", links: Object.freeze([
@@ -1464,6 +1465,85 @@ export function settlementsPage({
       <section class="open-settlements" aria-labelledby="open-settlements-title"><header><div><p>OPEN DOCUMENTS</p><h2 id="open-settlements-title">입금 · 지급 처리</h2></div><span>잔액이 있는 문서만 표시</span></header><div class="open-settlement-columns"><section><h3>받을 돈 <small>${overview.receivableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("collection", overview.receivableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>받을 돈이 없습니다.</strong><p>출고 후 아직 입금되지 않은 문서가 없습니다.</p></div>`}</section><section><h3>줄 돈 <small>${overview.payableDocuments.length.toLocaleString("ko-KR")}건</small></h3>${documentCards("payment", overview.payableDocuments) || `<div class="settlement-empty"><span aria-hidden="true">✓</span><strong>줄 돈이 없습니다.</strong><p>입고 후 아직 지급하지 않은 문서가 없습니다.</p></div>`}</section></div></section>
       ${refundRows ? `<section class="settlement-history return-settlement-history" aria-labelledby="return-settlement-title"><header><div><p>RETURN SETTLEMENTS</p><h2 id="return-settlement-title">반품 환불 · 환급 예정액</h2></div><span>총 <strong>${(overview.customerRefundDocuments.length + overview.supplierRefundDocuments.length).toLocaleString("ko-KR")}</strong>건</span></header><div class="table-scroll"><table><thead><tr><th>구분</th><th>거래처</th><th>원 문서</th><th>남은 금액</th></tr></thead><tbody>${refundRows}</tbody></table></div></section>` : ""}
       <section class="settlement-history" aria-labelledby="settlement-history-title"><header><div><p>CASH SETTLEMENT HISTORY</p><h2 id="settlement-history-title">최근 입금 · 지급 근거</h2></div><span>총 <strong>${overview.transactions.length.toLocaleString("ko-KR")}</strong>건</span></header>${transactionRows ? `<div class="table-scroll"><table><thead><tr><th>구분</th><th>처리일·번호</th><th>거래처</th><th>대상 문서</th><th>금액</th><th>메모</th></tr></thead><tbody>${transactionRows}</tbody></table></div>` : `<div class="settlement-empty"><span aria-hidden="true">◎</span><strong>입금·지급 이력이 없습니다.</strong><p>위 미결 문서에서 처리하면 근거가 여기에 남습니다.</p></div>`}</section>
+    </section>`,
+  });
+}
+
+export function vatReportPage({ user, csrfToken, warehouses, partners, items, summary }) {
+  const partnerMap = new Map(partners.map((partner) => [partner.id, partner]));
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const warehouseMap = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const quarterLabel = `${summary.year}년 ${summary.quarter}분기`;
+  const taxTypeLabels = { ...taxLabels, unclassified: "미분류" };
+  const result = summary.estimatedVatBalance > 0
+    ? { label: "예상 납부세액", amount: summary.estimatedPayableVat, className: "payable", note: "매출세액이 공제 가정 매입세액보다 많습니다." }
+    : summary.estimatedVatBalance < 0
+      ? { label: "예상 환급세액", amount: summary.estimatedRefundVat, className: "refund", note: "공제 가정 매입세액이 매출세액보다 많습니다." }
+      : { label: "납부·환급 예상", amount: 0, className: "balanced", note: "매출세액과 공제 가정 매입세액이 같습니다." };
+  const breakdown = (title, totals, className) => `<article class="vat-breakdown ${className}">
+    <header><div><p>${className === "sales" ? "OUTPUT TAX" : "INPUT TAX"}</p><h2>${title}</h2></div><strong>${escapeHtml(formatMoney(totals.vatAmount))}</strong></header>
+    <dl>
+      <div><dt>과세 공급가액</dt><dd>${escapeHtml(formatMoney(totals.taxableSupplyAmount))}</dd></div>
+      <div><dt>영세율 공급가액</dt><dd>${escapeHtml(formatMoney(totals.zeroRatedSupplyAmount))}</dd></div>
+      <div><dt>면세 공급가액</dt><dd>${escapeHtml(formatMoney(totals.exemptSupplyAmount))}</dd></div>
+      <div${totals.unclassifiedSupplyAmount ? ' class="warning"' : ""}><dt>미분류 공급가액</dt><dd>${escapeHtml(formatMoney(totals.unclassifiedSupplyAmount))}</dd></div>
+      <div class="total"><dt>순 공급가액</dt><dd>${escapeHtml(formatMoney(totals.netSupplyAmount))}</dd></div>
+      <div><dt>부가세 포함 합계</dt><dd>${escapeHtml(formatMoney(totals.grossAmount))}</dd></div>
+    </dl>
+    <p>정상 거래 ${totals.transactionCount.toLocaleString("ko-KR")}건 · 반품 ${totals.returnCount.toLocaleString("ko-KR")}건</p>
+  </article>`;
+  const transactionRows = summary.transactions.map((transaction) => {
+    const typeMeta = {
+      purchase: { label: "구매 입고", className: "purchase" },
+      sale: { label: "판매 출고", className: "sale" },
+      purchase_return: { label: "구매 반품", className: "sale" },
+      sales_return: { label: "판매 반품", className: "purchase" },
+    }[transaction.type];
+    const partner = partnerMap.get(transaction.partnerId);
+    const warehouse = warehouseMap.get(transaction.warehouseId);
+    const sign = transaction.isReturn ? "-" : "";
+    const lineDetails = transaction.lines.map((line) => {
+      const item = itemMap.get(line.itemId);
+      return `<div class="vat-line-detail"><strong>${escapeHtml(item?.name ?? "삭제된 품목")}</strong><span class="tax-badge ${escapeHtml(line.taxType)}">${escapeHtml(taxTypeLabels[line.taxType] ?? line.taxType)}</span><span>${escapeHtml(formatQuantity(line.quantity, item?.unit ?? ""))} × ${escapeHtml(formatMoney(line.unitPrice))}</span><em>공급 ${sign}${escapeHtml(formatMoney(line.supplyAmount))} · 세액 ${sign}${escapeHtml(formatMoney(line.vatAmount))}</em></div>`;
+    }).join("");
+    return `<tr data-vat-transaction="${escapeHtml(transaction.id)}">
+      <td><span class="trade-type ${typeMeta.className}">${typeMeta.label}</span></td>
+      <td><strong>${escapeHtml(formatKoreanDateTime(transaction.occurredAt))}</strong><small>${escapeHtml(transaction.documentNumber)}${transaction.sourceDocumentNumber ? ` · 원문서 ${escapeHtml(transaction.sourceDocumentNumber)}` : ""}</small></td>
+      <td><strong>${escapeHtml(partner?.name ?? "알 수 없는 거래처")}</strong><small>${escapeHtml(partner?.code ?? transaction.partnerId)}</small></td>
+      <td>${escapeHtml(warehouse?.name ?? transaction.warehouseId)}</td>
+      <td class="vat-lines">${lineDetails}</td>
+      <td class="number-cell vat-amount"><strong>${sign}${escapeHtml(formatMoney(transaction.supplyAmount))}</strong><small>세액 ${sign}${escapeHtml(formatMoney(transaction.vatAmount))}</small></td>
+    </tr>`;
+  }).join("");
+
+  return workspacePage({
+    title: "분기 부가세 예상",
+    active: "vat-report",
+    user,
+    csrfToken,
+    content: `<section class="report-content vat-report-content">
+      <header class="report-heading">
+        <div><p class="form-kicker">QUARTERLY VAT ESTIMATE</p><h1>분기 부가세 예상</h1><p>실제 입고·출고와 반품을 기준으로 이번 분기 납부 또는 환급 예상액을 계산합니다.</p></div>
+        <form action="/reports/vat" method="get" class="month-filter quarter-filter"><label for="vat-year">조회 분기</label><input id="vat-year" name="year" type="number" min="2000" max="9999" value="${escapeHtml(summary.year)}" required aria-label="조회 연도"><select name="quarter" aria-label="조회 분기">${[1, 2, 3, 4].map((quarter) => `<option value="${quarter}"${quarter === summary.quarter ? " selected" : ""}>${quarter}분기</option>`).join("")}</select><button type="submit">조회</button></form>
+      </header>
+
+      <aside class="report-basis vat-basis"><span aria-hidden="true">i</span><p><strong>일반과세자 단순 추정입니다.</strong> 품목 단가는 부가세 별도 공급가액으로 보고 과세 품목에 10%, 영세율·면세 품목에 0%를 적용했습니다. 구매 과세분은 적격 증빙과 업무 관련성 등 공제 요건을 모두 충족한다고 가정하며 신고서 제출 기능은 아닙니다.</p></aside>
+      ${summary.hasUnclassifiedItems ? `<div class="form-notice error" role="alert">과세 유형이 미분류인 거래가 있습니다. 해당 공급가액의 부가세는 0원으로 계산되므로 품목 기준정보를 확인해 주세요.</div>` : ""}
+
+      <section class="vat-summary" aria-label="${escapeHtml(quarterLabel)} 부가세 요약" data-vat-period="${escapeHtml(summary.period)}">
+        <article><span>매출세액</span><strong>${escapeHtml(formatMoney(summary.sales.vatAmount))}</strong><p>판매 출고 − 판매 반품</p></article>
+        <article><span>공제 가정 매입세액</span><strong>${escapeHtml(formatMoney(summary.purchases.vatAmount))}</strong><p>구매 입고 − 구매 반품</p></article>
+        <article class="result ${result.className}"><span>${result.label}</span><strong>${escapeHtml(formatMoney(result.amount))}</strong><p>${escapeHtml(result.note)}</p></article>
+      </section>
+
+      <div class="vat-breakdown-grid">${breakdown("매출 과세표준과 세액", summary.sales, "sales")}${breakdown("매입 공급가액과 공제 가정 세액", summary.purchases, "purchases")}</div>
+
+      <aside class="vat-disclaimer"><h2>신고 전 반드시 확인하세요</h2><p>세금계산서·카드전표 등 적격 증빙, 불공제 매입세액, 공통매입 안분, 의제매입·대손·신용카드 세액공제, 수입·고정자산, 예정고지·가산세와 수정신고는 반영하지 않습니다. 품목의 현재 과세 유형을 사용하므로 과거 유형이 바뀐 거래도 원 증빙과 대조해야 합니다.</p></aside>
+
+      <section class="trade-history vat-history" aria-labelledby="vat-history-title">
+        <div class="trade-history-heading"><div><p>TRANSACTION BASIS</p><h2 id="vat-history-title">${escapeHtml(quarterLabel)} 계산 근거</h2><small>${escapeHtml(formatDate(summary.startDate))} ~ ${escapeHtml(formatDate(summary.endDate))}</small></div><span>총 <strong>${summary.transactions.length.toLocaleString("ko-KR")}</strong>건</span></div>
+        ${summary.transactions.length ? `<div class="table-scroll"><table><thead><tr><th>구분</th><th>처리 일시·문서</th><th>거래처</th><th>창고</th><th>품목·과세 유형·산식</th><th>공급가액·세액</th></tr></thead><tbody>${transactionRows}</tbody></table></div>` : `<div class="report-empty"><span aria-hidden="true">VAT</span><strong>이 분기에 반영된 매출·매입이 없습니다.</strong><p>실제 입고 또는 출고를 처리하면 공급가액과 세액이 여기에 표시됩니다.</p></div>`}
+      </section>
     </section>`,
   });
 }

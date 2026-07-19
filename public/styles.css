@@ -509,10 +509,58 @@ button, input { font: inherit; }
 .report-empty strong { color: #586762; font-size: 12px; }
 .report-empty p { margin: 7px 0 0; font-size: 9px; }
 
+/* Quarterly VAT estimate */
+.quarter-filter input { width: 86px; }
+.quarter-filter select { height: 38px; min-width: 92px; padding: 0 28px 0 10px; border: 1px solid #d3d8d2; border-radius: 6px; color: var(--ink); background: #fff; font-size: 11px; }
+.vat-basis { border-color: #d7c9a9; color: #755d36; background: #fff8e8; }
+.vat-basis > span { background: #a87b35; }
+.vat-basis strong { color: #6d5127; }
+.vat-summary { display: grid; grid-template-columns: repeat(3,1fr); gap: 15px; margin-bottom: 20px; }
+.vat-summary article { min-height: 152px; padding: 23px; border: 1px solid #d9ddd7; border-radius: 11px; background: rgba(255,255,255,.72); box-shadow: 0 8px 25px rgba(36,54,48,.045); }
+.vat-summary article > span { color: #7f8b86; font-size: 10px; font-weight: 700; }
+.vat-summary article > strong { display: block; margin-top: 21px; color: var(--ink); font-size: clamp(24px,2.35vw,34px); letter-spacing: -.035em; }
+.vat-summary article > p { margin: 8px 0 0; color: #939d99; font-size: 9px; }
+.vat-summary .result { color: #fff; background: var(--green); border-color: var(--green); }
+.vat-summary .result > span, .vat-summary .result > p { color: #b5c9c4; }
+.vat-summary .result > strong { color: var(--orange); }
+.vat-summary .result.refund > strong { color: #9dd9cb; }
+.vat-summary .result.balanced > strong { color: #e1e9e6; }
+.vat-breakdown-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px; margin-bottom: 20px; }
+.vat-breakdown { overflow: hidden; border: 1px solid #d9ddd7; border-radius: 11px; background: rgba(255,255,255,.7); }
+.vat-breakdown > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 22px; border-bottom: 1px solid #e3e6e1; }
+.vat-breakdown > header p { margin: 0 0 5px; color: #2f7880; font-size: 8px; font-weight: 800; letter-spacing: .15em; }
+.vat-breakdown > header h2 { margin: 0; color: var(--ink); font-size: 14px; }
+.vat-breakdown > header > strong { color: #287362; font-size: 21px; white-space: nowrap; }
+.vat-breakdown.purchases > header > strong { color: #a05d48; }
+.vat-breakdown dl { margin: 0; padding: 9px 22px; }
+.vat-breakdown dl div { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 34px; border-bottom: 1px dashed #e3e6e1; }
+.vat-breakdown dl div:last-child { border-bottom: 0; }
+.vat-breakdown dt { color: #7b8882; font-size: 9px; }
+.vat-breakdown dd { margin: 0; color: #46564f; font-size: 10px; font-weight: 700; }
+.vat-breakdown dl .total dt, .vat-breakdown dl .total dd { color: var(--ink); font-weight: 800; }
+.vat-breakdown dl .warning dt, .vat-breakdown dl .warning dd { color: #a64e36; }
+.vat-breakdown > p { margin: 0; padding: 11px 22px; color: #89948f; background: #f5f6f2; font-size: 8px; }
+.vat-disclaimer { margin-bottom: 20px; padding: 17px 20px; border-left: 3px solid #9b6b5b; border-radius: 4px 9px 9px 4px; background: #f8f1ee; }
+.vat-disclaimer h2 { margin: 0 0 6px; color: #754a3c; font-size: 11px; }
+.vat-disclaimer p { margin: 0; color: #816e67; font-size: 9px; line-height: 1.65; }
+.vat-history .trade-history-heading small { display: block; margin-top: 5px; color: #89958f; font-size: 8px; }
+.vat-history table { min-width: 1120px; }
+.vat-lines { min-width: 385px; }
+.vat-line-detail { display: grid; grid-template-columns: minmax(95px,1fr) auto minmax(125px,auto); align-items: center; gap: 8px; margin-top: 7px; }
+.vat-line-detail:first-child { margin-top: 0; }
+.vat-line-detail > strong { color: #34443e; font-size: 9px; }
+.vat-line-detail > span:not(.tax-badge) { color: #8c9792; font-size: 8px; white-space: nowrap; }
+.vat-line-detail > em { grid-column: 1 / -1; color: #68766f; font-size: 8px; font-style: normal; }
+.vat-amount { white-space: nowrap; }
+.vat-amount strong { color: #34443e; font-size: 11px; }
+.vat-amount small { color: #8b6b55 !important; }
+
 @media (max-width: 900px) {
   .trade-summary { grid-template-columns: 1fr; }
   .trade-summary article { min-height: 145px; }
   .trade-summary article > strong { margin-top: 17px; }
+  .vat-summary, .vat-breakdown-grid { grid-template-columns: 1fr; }
+  .vat-summary article { min-height: 130px; }
 }
 
 @media (max-width: 760px) {
@@ -520,6 +568,9 @@ button, input { font: inherit; }
   .report-heading { align-items: flex-start; flex-direction: column; }
   .month-filter { width: 100%; }
   .month-filter input { flex: 1; width: auto; }
+  .quarter-filter { align-items: stretch; flex-wrap: wrap; }
+  .quarter-filter label { flex-basis: 100%; }
+  .quarter-filter select { flex: 1; }
   .report-basis { align-items: flex-start; }
   .period-close-card { grid-template-columns: 40px 1fr; align-items: start; }
   .period-close-icon { width: 40px; height: 40px; }
@@ -921,6 +972,7 @@ button, input { font: inherit; }
 .tax-badge.taxable { color: #75501a; background: #fff0d8; }
 .tax-badge.zero-rated { color: #24643b; background: #e6f4ea; }
 .tax-badge.exempt { color: #5f6178; background: #ececf3; }
+.tax-badge.unclassified { color: #9b4935; background: #f9e5df; }
 .item-master-grid { grid-template-columns: minmax(410px, 480px) minmax(620px, 1fr); }
 
 .empty-state { display: grid; place-items: center; min-height: 265px; color: #8c9792; text-align: center; }
